@@ -58,7 +58,7 @@ def prepare(config, destination):
             files[split] = {"path": str(path), "sha256": file_sha(path),
                             "blocks": len(tokens), "tokens": usable}
         model_files = {str(p.relative_to(model_path)): file_sha(p) for p in Path(model_path).iterdir()
-                       if p.is_file() and p.suffix in {".json", ".safetensors", ".jinja"}}
+                       if p.is_file() and p.suffix in {".json", ".safetensors", ".jinja", ".txt", ".model"}}
         manifest = {"format": 1, "request_hash": digest(request), "request": request,
                     "model_id": model_id, "model_revision": model_rev, "model_path": str(model_path),
                     "model_files": model_files, "dataset_id": d["id"], "dataset_config": d["name"],

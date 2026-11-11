@@ -15,9 +15,13 @@ def test_task_lock_detects_tampering_and_changed_config(tmp_path, monkeypatch):
     task = tmp_path/"task"
     task.mkdir()
     (task/"task.toml").write_text("original")
+    cache = tmp_path/"cache"
+    cache.mkdir()
+    (cache/"vocab").write_text("tokenizer")
     cfg = {"seeds": [1]}
     lock = {"request_hash": digest(cfg), "runnable": False, "source": "unused", "revision": "unused",
-            "tasks": [{"path": str(task), "sha256": tree_hash(task)}]}
+            "tasks": [{"path": str(task), "sha256": tree_hash(task)}],
+            "budget_tokenizer_cache": {"path": str(cache), "sha256": tree_hash(cache)}}
     verify_lock(lock, cfg, runnable=False)
     with pytest.raises(ValueError):
         verify_lock(lock, cfg)

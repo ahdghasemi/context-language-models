@@ -63,3 +63,40 @@ def test_bf16_export_projects_trained_fp32_weights_before_rounding(tmp_path):
         layer = deployed.get_submodule(name)
         torch.testing.assert_close(layer.left.weight, left.to(torch.bfloat16), rtol=0, atol=0)
         torch.testing.assert_close(layer.right.weight, right.to(torch.bfloat16), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("policy", ["gnn_persistent", "flow_reset"])
+def test_optimizer_stage_semantics_and_restart(tmp_path, policy):
+    model, cfg, data = prepare_tiny(tmp_path/"assets")
+    cfg["training"]["optimizer_policy"] = policy
+    reference = copy.deepcopy(model)
+    assert not train(model, data["train"], data["validation"], cfg, tmp_path/"run", stop_after=4)
+    state = torch.load(tmp_path/"run/latest.pt", weights_only=False)
+    adam_steps = {int(v["step"]) for v in state["optimizer"]["state"].values()}
+    assert adam_steps == ({4} if policy == "gnn_persistent" else {1})
+    assert train(model, data["train"], data["validation"], cfg, tmp_path/"run", resume=True)
+    assert train(reference, data["train"], data["validation"], cfg, tmp_path/"full")
+    for key, value in model.state_dict().items():
+        torch.testing.assert_close(value, reference.state_dict()[key], rtol=0, atol=0)
+
+
+def test_advance_signal_saves_incomplete_checkpoint(tmp_path):
+    import os
+    import signal
+    model, cfg, data = prepare_tiny(tmp_path/"assets")
+    fired = []
+
+    def interrupt_once(*_):
+        if not fired:
+            fired.append(True)
+            os.kill(os.getpid(), signal.SIGUSR1)
+
+    handle = model.register_forward_pre_hook(interrupt_once)
+    try:
+        assert not train(model, data["train"], data["validation"], cfg, tmp_path/"run")
+    finally:
+        handle.remove()
+    state = torch.load(tmp_path/"run/latest.pt", weights_only=False)
+    assert not state["complete"] and state["total_steps"] == 1
+    assert state["optimizer"] and state["scheduler"] and state["constraint"]
+    assert train(model, data["train"], data["validation"], cfg, tmp_path/"run", resume=True)

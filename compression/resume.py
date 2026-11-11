@@ -35,6 +35,19 @@ def main():
               else ["export", "evaluate", "profile", "contextbench"] if a.from_stage == "export"
               else [a.from_stage])
     submitted = {}
+    retry_log = None
+    if a.submit:
+        # Include previous retry job IDs, not only the initial submission.
+        known = set()
+        for record in [campaign/"jobs.json", *campaign.glob("resume-jobs-*.json")]:
+            known.update(json.loads(record.read_text()).values())
+        active = set(subprocess.check_output(["squeue", "-h", "-r", "-u", os.environ["USER"],
+                                              "-o", "%i"], text=True).split())
+        collisions = {f"{j}_{i}" for j in known for i in ids} & active
+        if collisions:
+            raise RuntimeError("selected tasks still active: "+", ".join(sorted(collisions)))
+        import time
+        retry_log = campaign/("resume-jobs-"+str(time.time_ns())+".json")
     for stage in stages:
         cmd = ["sbatch", "--parsable", "--job-name=tclm-resume-"+stage, *resource_args(True, stage),
                "--array="+",".join(map(str, ids))+"%"+os.environ.get("TINY_CLM_CONCURRENCY", "2"),
@@ -48,19 +61,13 @@ def main():
         cmd += [str(Path(spec["snapshot"])/"compression/slurm/job.sbatch"), str(manifest), stage]
         print(shlex.join(cmd))
         if a.submit:
-            # Do not race an existing owner; the trainer also takes an exclusive lock.
-            old_jobs = json.loads((campaign/"jobs.json").read_text())
-            for old in old_jobs.values():
-                for i in ids:
-                    active = subprocess.run(["squeue", "-h", "-j", f"{old}_{i}", "-o", "%i"], capture_output=True, text=True)
-                    if active.returncode == 0 and active.stdout.strip():
-                        raise RuntimeError(f"original task {old}_{i} is still active")
-            submitted[stage] = subprocess.check_output(cmd, text=True).strip().split(";", 1)[0]
+            jid = subprocess.check_output(cmd, text=True).strip().split(";", 1)[0]
+            if not jid.isdigit():
+                raise RuntimeError("invalid Slurm job ID: "+jid)
+            submitted[stage] = jid
+            retry_log.write_text(json.dumps(submitted, indent=2)+"\n")
         else:
             submitted[stage] = "<"+stage+">"
-    if a.submit:
-        import time
-        (campaign/("resume-jobs-"+str(int(time.time()))+".json")).write_text(json.dumps(submitted, indent=2))
     print("After these jobs finish, rerun aggregate.py on the same manifest to include every run.")
 
 

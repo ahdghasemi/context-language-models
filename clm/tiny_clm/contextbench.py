@@ -31,6 +31,9 @@ def verify_lock(lock, cb, *, runnable=True):
     if lock["request_hash"] != digest(cb) or (runnable and not lock["runnable"]):
         raise ValueError("prepared tasks differ from the request or lack a container")
     check_source(lock["source"], lock["revision"])
+    cache = lock.get("budget_tokenizer_cache")
+    if not cache or tree_hash(Path(cache["path"])) != cache["sha256"]:
+        raise ValueError("budget tokenizer cache is missing or changed; prepare a new task directory")
     if lock["runnable"] and file_sha(lock["image"]) != lock["image_sha256"]:
         raise ValueError("task container changed")
     for task in lock["tasks"]:
@@ -60,6 +63,18 @@ def prepare(config, source, destination, recipe, *, skip_container=False):
         revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
         if revision != cb["revision"] or subprocess.check_output(["git", "-C", str(source), "diff", "HEAD"], text=True):
             raise ValueError("ContextBench source must be clean and at the pinned revision; use a new source directory")
+        # Materialize the benchmark's counting vocabulary on the preparation node.
+        # A fallback from o200k to chars/3 or chars/4 would change the task budget.
+        encoding = cb.get("budget_tokenizer", "o200k_base")
+        if encoding != "o200k_base":
+            raise ValueError("paper task feasibility was calibrated with o200k_base")
+        cache = destination/"budget-tokenizer"
+        cache.mkdir(exist_ok=True)
+        token_env = dict(os.environ, TIKTOKEN_ENCODING=encoding, TIKTOKEN_CACHE_DIR=str(cache))
+        subprocess.run([sys.executable, "-c", "import tiktoken; tiktoken.get_encoding('o200k_base')"],
+                       env=token_env, check=True)
+        if not any(cache.iterdir()):
+            raise RuntimeError("budget tokenizer preparation did not produce a persistent cache")
         sys.path.insert(0, str(source))
         import yaml
         official = yaml.safe_load((source/"contextbench/configs/paper.yaml").read_text())
@@ -92,7 +107,7 @@ def prepare(config, source, destination, recipe, *, skip_container=False):
                 "--containall", "--pid", "--no-mount", "home,tmp,bind-paths", str(image),
                 "/opt/harbor-server/bin/python3", "-c", "import fastapi,uvicorn; print('container runtime check passed')"], check=True)
         # Pinned source via PYTHONPATH, never editable pip installs into a live job environment.
-        env = dict(os.environ, PYTHONPATH=str(source)+os.pathsep+os.environ.get("PYTHONPATH", ""))
+        env = dict(token_env, PYTHONPATH=str(source)+os.pathsep+os.environ.get("PYTHONPATH", ""))
         tasks = destination/"tasks"
         if not tasks.exists():
             subprocess.run([sys.executable, "-m", "contextbench.cli", "package", "--all",
@@ -105,7 +120,8 @@ def prepare(config, source, destination, recipe, *, skip_container=False):
         manifest = {"request_hash": digest(cb), "source": str(source), "revision": revision,
                     "image": str(image), "image_sha256": None if skip_container else file_sha(image),
                     "tasks": [{"path": p, "sha256": tree_hash(Path(p))} for p in names],
-                    "runnable": not skip_container, "recipe_sha256": file_sha(recipe)}
+                    "runnable": not skip_container, "recipe_sha256": file_sha(recipe),
+                    "budget_tokenizer_cache": {"path": str(cache), "sha256": tree_hash(cache)}}
         write_json(destination/"contextbench-lock.json", manifest)
         return manifest
 
@@ -135,7 +151,14 @@ def run(artifact, config, lock_path, output, device="cuda"):
         raise RuntimeError("Harbor needs the singularity compatibility executable from Apptainer")
     spec = read_json(Path(artifact)/"compression.json")
     env = dict(os.environ, OPENAI_API_KEY="EMPTY",
+               TIKTOKEN_CACHE_DIR=lock["budget_tokenizer_cache"]["path"],
+               TIKTOKEN_ENCODING=cb.get("budget_tokenizer", "o200k_base"),
+               CLM_TOK_RATIO="1" if cb.get("calibrate_budget", False) else "0",
                PYTHONPATH=lock["source"]+os.pathsep+os.environ.get("PYTHONPATH", ""))
+    # Check both upstream counters in the exact subprocess environment before serving.
+    check = ("from clm_harness.utils import tokens as a; from contextbench import tokens as b; "
+             "assert a.count_tokens([])[1] == b.count_tokens([])[1] == 'tiktoken:o200k_base'")
+    subprocess.run([sys.executable, "-c", check], env=env, check=True)
     episodes = []
     for mode in cb["modes"]:
         agent = {"clm": "clm_contextbench:ClmStream",

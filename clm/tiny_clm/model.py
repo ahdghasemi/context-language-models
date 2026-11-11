@@ -10,7 +10,7 @@ from safetensors.torch import load_model, save_model
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 
 from .io import read_json, write_json, file_sha
-from .lowrank import replace, accounting
+from .lowrank import replace, accounting, FactorizedLinear
 
 DTYPES = {"float32": torch.float32, "bfloat16": torch.bfloat16}
 
@@ -28,6 +28,10 @@ def dense_model(source, revision=None, *, device="cpu", dtype="float32"):
 
 def export_model(model, destination, ranks, *, tokenizer=None, provenance=None, dtype="bfloat16"):
     """Atomic directory publication, safetensors, no optimizer/proxy/dense duplicates."""
+    for name, rank in ranks.items():
+        layer = model.get_submodule(name)
+        if not isinstance(layer, FactorizedLinear) or layer.rank != rank:
+            raise ValueError("export requires physical factors matching every declared rank")
     dst = Path(destination)
     if dst.exists():
         raise FileExistsError(f"refusing to overwrite deployment artifact: {dst}")

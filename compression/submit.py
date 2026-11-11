@@ -13,8 +13,11 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/"clm"))
+from tiny_clm.provenance import require_gate, snapshot_files, verify_snapshot  # noqa: E402
 
 
 def read(path):
@@ -26,6 +29,10 @@ def write(path, value):
 
 
 def grid(config, stage):
+    if stage == "baseline":
+        cfg = copy.deepcopy(config)
+        cfg.update(method="original", seed=0)
+        return [{"run_id": "original-keep0.8-seed0", "config": cfg}]
     if stage == "ablations":
         # One seed, matched updates. Constant-mu controls are explicitly ablations.
         rows = []
@@ -64,9 +71,16 @@ def grid(config, stage):
 
 def resource_args(gpu, stage):
     args = ["--nodes=1", "--ntasks=1", "--kill-on-invalid-dep=yes", "--signal=USR1@180"]
-    args += ["--cpus-per-task="+os.environ.get("TINY_CLM_CPUS", "8"),
-             "--mem="+os.environ.get("TINY_CLM_MEM", "64G"),
-             "--time="+os.environ.get("TINY_CLM_TIME", "12:00:00")]
+    small = stage in {"correctness", "smoke", "aggregate"}
+    defaults = {"CPUS": "2" if small else os.environ.get("TINY_CLM_CPUS", "8"),
+                "MEM": "8G" if small else os.environ.get("TINY_CLM_MEM", "64G"),
+                "TIME": "00:30:00" if small else os.environ.get("TINY_CLM_TIME", "12:00:00")}
+    if stage == "environment":
+        defaults["TIME"] = "00:15:00"
+    if stage == "contextbench":
+        defaults["TIME"] = "24:00:00"
+    for key, flag in [("CPUS", "cpus-per-task"), ("MEM", "mem"), ("TIME", "time")]:
+        args += ["--"+flag+"="+os.environ.get("TINY_CLM_"+stage.upper()+"_"+key, defaults[key])]
     partition = os.environ.get("TINY_CLM_PARTITION" if gpu else "TINY_CLM_CPU_PARTITION", "gpu" if gpu else "cpu")
     args += ["--partition="+partition]
     if gpu:
@@ -79,11 +93,6 @@ def resource_args(gpu, stage):
     for env, flag in [("TINY_CLM_ACCOUNT", "account"), ("TINY_CLM_QOS", "qos")]:
         if os.environ.get(env):
             args += ["--"+flag+"="+os.environ[env]]
-    # Small jobs need not inherit the full training allocation.
-    if stage in {"correctness", "smoke", "aggregate"}:
-        args += ["--cpus-per-task=2", "--mem=8G", "--time=00:30:00"]
-    if stage == "contextbench":
-        args += ["--time="+os.environ.get("TINY_CLM_CONTEXTBENCH_TIME", "24:00:00")]
     return args
 
 
@@ -112,6 +121,7 @@ def snapshot(commit, parent):
     if target.exists():
         if not (target/"SNAPSHOT_COMMIT").exists() or (target/"SNAPSHOT_COMMIT").read_text().strip() != commit:
             raise ValueError("incomplete snapshot path already exists")
+        verify_snapshot(target)
         return target
     with tempfile.TemporaryDirectory(dir=parent) as tmp:
         archive = Path(tmp)/"source.tar"
@@ -121,6 +131,7 @@ def snapshot(commit, parent):
         with tarfile.open(archive) as t:
             t.extractall(contents, filter="data")
         (contents/"SNAPSHOT_COMMIT").write_text(commit+"\n")
+        write(contents/"SNAPSHOT_FILES.json", snapshot_files(contents))
         for file in contents.rglob("*"):
             if file.is_file():
                 file.chmod(file.stat().st_mode & ~0o222)
@@ -130,15 +141,16 @@ def snapshot(commit, parent):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("stage", choices=["environment", "correctness", "prepare", "pilot", "main", "ablations"])
+    p.add_argument("stage", choices=["environment", "correctness", "prepare", "baseline", "pilot", "main", "ablations"])
     p.add_argument("--config", default="compression/configs/pilot.json")
     p.add_argument("--campaign", help="new absolute campaign directory (auto-generated otherwise)")
     p.add_argument("--submit", action="store_true", help="without this, print only; create no snapshots/jobs")
     p.add_argument("--pilot-gate")
+    p.add_argument("--baseline-gate")
     a = p.parse_args(argv)
     cfg = read(a.config)
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    rows = grid(cfg, a.stage) if a.stage in {"pilot", "main", "ablations"} else []
+    rows = grid(cfg, a.stage) if a.stage in {"baseline", "pilot", "main", "ablations"} else []
     work = Path(os.environ.get("TINY_CLM_WORK", "/work/pi_aghasemi_umass_edu/tiny_clm_work"))
     campaign = Path(a.campaign or (Path(os.environ.get("TINY_CLM_RUNS", work/"campaigns"))/
                     f"{a.stage}-{time.strftime('%Y%m%dT%H%M%S')}-{commit[:8]}" )).resolve()
@@ -167,14 +179,19 @@ def main(argv=None):
         raise ValueError("commit all intended changes before submission; uncommitted code cannot be snapshotted")
     if any(x[1] for x in plan) and not os.environ.get("TINY_CLM_GPU_CONSTRAINT"):
         raise ValueError("set TINY_CLM_GPU_CONSTRAINT from Unity sinfo for BF16-capable >=24 GiB hardware")
+    if a.stage == "pilot":
+        if not a.baseline_gate:
+            raise ValueError("pilot requires --baseline-gate from a completed dense baseline campaign")
+        gate = read(a.baseline_gate)
+        require_gate(gate, cfg, "baseline")
+        spec["baseline_gate"] = gate
     if a.stage in {"main", "ablations"}:
-        if not a.pilot_gate or not read(a.pilot_gate).get("passed"):
-            raise ValueError("main grid requires a passing pilot gate.json")
+        if not a.pilot_gate:
+            raise ValueError("main/ablations require --pilot-gate")
         gate = read(a.pilot_gate)
-        if gate["model_id"] != cfg["model"]["id"] or gate["selection_kind"] != cfg["selection"]["kind"]:
-            raise ValueError("pilot gate belongs to a different model/layer policy")
+        require_gate(gate, cfg, "pilot")
         spec["pilot_gate"] = gate
-    if a.stage in {"pilot", "main", "ablations"}:
+    if a.stage in {"baseline", "pilot", "main", "ablations"}:
         if not Path(spec["assets"]).is_file() or not (Path(spec["contextbench_dir"])/"contextbench-lock.json").is_file():
             raise FileNotFoundError("run prepare for this config and inspect its successful completion first")
     venv = Path(spec["venv"])
@@ -185,6 +202,7 @@ def main(argv=None):
     (campaign/"logs").mkdir()
     (campaign/"configs").mkdir()
     spec["snapshot"] = str(snap)
+    spec["snapshot_hash"] = verify_snapshot(snap)
     spec["environment"] = read(venv/"READY.json")
     for row in rows:
         target = campaign/"configs"/(row["run_id"]+".json")

@@ -13,6 +13,10 @@ def main():
     manifest, stage = Path(sys.argv[1]), sys.argv[2]
     spec = json.loads(manifest.read_text())
     campaign, snapshot = Path(spec["campaign"]), Path(spec["snapshot"])
+    from tiny_clm.provenance import verify_snapshot
+    verify_snapshot(snapshot, spec["snapshot_hash"])
+    if json.loads((campaign/"config.json").read_text()) != spec["config"]:
+        raise ValueError("campaign configuration changed after submission")
     freeze = subprocess.check_output([sys.executable, "-m", "pip", "freeze"])
     if hashlib.sha256(freeze).hexdigest() != spec["environment"]["freeze_sha256"]:
         raise RuntimeError("Python environment changed after setup; use a new environment and campaign")
@@ -36,6 +40,8 @@ def main():
         row = spec["rows"][index]
         run = campaign/"runs"/row["run_id"]
         config = campaign/"configs"/(row["run_id"]+".json")
+        if json.loads(config.read_text()) != row["config"]:
+            raise ValueError("run configuration changed after submission")
         if stage == "train":
             command = py+["train", "--config", str(config), "--assets", spec["assets"], "--run", str(run)]
             if os.environ.get("TINY_CLM_RESUME") == "1":

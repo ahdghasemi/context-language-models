@@ -2,6 +2,7 @@
 # All resource requests are supplied explicitly by submit.py or resume.py.
 # A direct sbatch call must supply resources and the two positional arguments.
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 MANIFEST=${1:?absolute campaign manifest required}
 STAGE=${2:?stage required}
 : "${TINY_CLM_VENV:?source the same unity.env used at submission}"

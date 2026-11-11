@@ -2,6 +2,7 @@
 # Use the resource flags shown in README_UNITY.md. This job consumes an existing,
 # validated export; no training or code updates occur here.
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 MANIFEST=${1:?campaign manifest}
 SELECTION=${2:?frozen selection JSON}
 STAGE=${3:?prepare/evaluate/aggregate}

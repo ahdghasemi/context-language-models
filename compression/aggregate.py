@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import csv
 import math
 from pathlib import Path
@@ -12,6 +13,20 @@ import statistics
 import numpy as np
 
 from tiny_clm.io import digest, read_json, write_json
+from tiny_clm.provenance import protocol_contract
+
+
+def validate_episodes(config, summary):
+    cb = config["contextbench"]
+    if summary["contextbench"] != cb or summary["source_revision"] != cb["revision"]:
+        raise ValueError("ContextBench results use different tasks or decoding settings")
+    episodes = summary["episodes"]
+    keys = [(e["episode"], e["mode"]) for e in episodes]
+    expected = len(cb["tasks"])*len(cb["seeds"])
+    if len(keys) != len(set(keys)) or Counter(e["mode"] for e in episodes) != {m: expected for m in cb["modes"]}:
+        raise ValueError("ContextBench episode coverage is incomplete or duplicated")
+    if summary["all_complete"] != all(e["status"] == "complete" for e in episodes):
+        raise ValueError("ContextBench completion flag contradicts its episodes")
 
 
 def collect(spec):
@@ -36,6 +51,7 @@ def collect(spec):
             elif key == "artifact":
                 identity[key] = value["weight_sha256"]
             elif key == "clm":
+                validate_episodes(cfg, value)
                 for i, episode in enumerate(value["episodes"]):
                     identity["episode"+str(i)] = episode["weight_sha256"]
             if key == "training":
@@ -117,6 +133,14 @@ def paired_summary(rows, episodes):
 def gate(spec, rows, episodes):
     thresholds = spec["config"]["provisional_thresholds"]
     candidates = []
+    baseline = spec.get("stage") == "baseline"
+    if baseline:
+        for row in rows:
+            if row["status"] != "complete" or row["method"] != "original":
+                continue
+            scores = [e["rewards"]["reward"] for e in episodes[row["run_id"]] if e["mode"] == "clm"]
+            candidates.append({"run_id": row["run_id"], "passed": bool(scores) and
+                               all(s >= thresholds["min_dense_clm_reward"] for s in scores)})
     for row in rows:
         if row["status"] != "complete" or row["method"] != "constrained":
             continue
@@ -138,6 +162,8 @@ def gate(spec, rows, episodes):
                         e["rewards"]["reward"] >= reference-thresholds["max_clm_absolute_drop"])
         candidates.append({"run_id": row["run_id"], "checks": checks, "passed": all(checks.values())})
     return {"passed": bool(candidates) and all(r["status"] == "complete" for r in rows) and any(c["passed"] for c in candidates),
+            "gate_type": "baseline" if baseline else "pilot",
+            "protocol_contract": protocol_contract(spec["config"], baseline=baseline),
             "thresholds_provisional": True, "thresholds": thresholds, "candidates": candidates,
             "model_id": spec["config"]["model"]["id"], "selection_kind": spec["config"]["selection"]["kind"],
             "pilot_commit": spec["commit"], "manifest_hash": digest(spec),

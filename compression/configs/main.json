@@ -36,7 +36,8 @@
     "lr": 1e-05,
     "precision": "bfloat16",
     "gradient_checkpointing": true,
-    "projection_every": 1
+    "projection_every": 1,
+    "optimizer_policy": "gnn_persistent"
   },
   "calibration_batches": 16,
   "export_dtype": "bfloat16",
@@ -80,7 +81,9 @@
         "family": "sudoku_sketchpad",
         "level": "t30"
       }
-    ]
+    ],
+    "budget_tokenizer": "o200k_base",
+    "calibrate_budget": false
   },
   "provisional_thresholds": {
     "max_perplexity_ratio": 1.1,

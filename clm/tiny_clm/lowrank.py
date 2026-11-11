@@ -112,7 +112,7 @@ def select(model, policy: dict) -> dict[str, int]:
     aliases = Counter(id(p) for _, p in model.named_parameters(remove_duplicate=False))
     ranks = {}
     layer_ids = policy.get("layer_ids")
-    if layer_ids is not None and (not layer_ids or len(set(layer_ids)) != len(layer_ids)):
+    if layer_ids is not None and (not layer_ids or any(type(i) is not int or i < 0 for i in layer_ids) or len(set(layer_ids)) != len(layer_ids)):
         raise ValueError("layer_ids must be unique and nonempty")
     seen = set()
     for name, layer in model.named_modules():
@@ -121,7 +121,9 @@ def select(model, policy: dict) -> dict[str, int]:
             continue
         if type(layer) is not nn.Linear or aliases[id(layer.weight)] != 1:
             raise ValueError(f"unsupported or shared target: {name}")
-        r = policy.get("ranks", {}).get(name, rank_for(layer.weight.shape, policy["keep"]))
+        r = policy.get("ranks", {}).get(name)
+        if r is None:
+            r = rank_for(layer.weight.shape, policy["keep"])
         validate_rank(*layer.weight.shape, r)
         ranks[name] = r
         seen.add(int(match[1]))

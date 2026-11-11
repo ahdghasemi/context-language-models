@@ -28,6 +28,8 @@ def validate(config):
         raise ValueError("use FP32 or BF16 autocast with FP32 master weights")
     if not (math.isfinite(t["lr"]) and t["lr"] > 0):
         raise ValueError("invalid learning rate")
+    if t.get("optimizer_policy", "gnn_persistent") not in {"gnn_persistent", "flow_reset"}:
+        raise ValueError("optimizer_policy must be gnn_persistent or flow_reset")
     mu_schedule(**config["penalty"])
     constant = config.get("ablation_constant_mu")
     if constant is not None and not (math.isfinite(constant) and constant > 0):
@@ -154,15 +156,17 @@ def _train(model, train_data, val_data, cfg, root, resume, stop_after):
     wall, projection_seconds, updates_seconds = 0., 0., 0.
     interrupted = [False]
     old_handlers = {}
-    for sig in [signal.SIGTERM, signal.SIGUSR1]:
-        old_handlers[sig] = signal.getsignal(sig)
-        signal.signal(sig, lambda *_: interrupted.__setitem__(0, True))
     initialization_seconds = time.perf_counter()-start_time
 
     def new_optimizer():
-        # Flow reference resets moments at each mu stage. No weight decay added.
+        # Original GNN: retain Adam moments across best-weight restoration.
+        # Flow resets are an explicit, separately labeled ablation. No weight decay.
         optimizer = torch.optim.Adam(model.parameters(), lr=t["lr"], betas=(0.9, 0.999))
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t["stage_steps"])
+        if t.get("optimizer_policy", "gnn_persistent") == "gnn_persistent":
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=t["stage_steps"],
+                                                       gamma=math.sqrt(cfg["penalty"]["gamma"]))
+        else:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t["stage_steps"])
         return optimizer, scheduler
 
     if resume:
@@ -214,7 +218,12 @@ def _train(model, train_data, val_data, cfg, root, resume, stop_after):
             "elapsed_seconds": elapsed, "projection_seconds": projection_seconds,
             "updates_seconds": updates_seconds, "initialization_seconds": initialization_seconds, "memory": memory()})
 
+    for sig in [signal.SIGTERM, signal.SIGUSR1]:
+        old_handlers[sig] = signal.getsignal(sig)
+        signal.signal(sig, lambda *_: interrupted.__setitem__(0, True))
     try:
+        if not resume:
+            save()  # permits restart even if the first expensive update is killed
         while stage < len(stages):
             mu = stages[stage]
             if opt is None:
@@ -257,7 +266,9 @@ def _train(model, train_data, val_data, cfg, root, resume, stop_after):
                     torch.cuda.synchronize()
                 updates_seconds += time.perf_counter()-before
                 record = {"stage": stage, "step": step, "global_step": total_steps, "mu": mu,
-                          "train_nll": task_loss, "penalty": penalty, "training_tokens": tokens}
+                          "train_nll": task_loss, "penalty": penalty, "training_tokens": tokens,
+                          "optimizer_policy": t.get("optimizer_policy", "gnn_persistent"),
+                          "learning_rate_next": opt.param_groups[0]["lr"]}
                 if step % t["eval_every"] == 0 or step == t["stage_steps"]:
                     metric = nll(model, val_data, t["validation_batches"], precision=t["precision"])
                     score = metric["nll"]
@@ -284,8 +295,10 @@ def _train(model, train_data, val_data, cfg, root, resume, stop_after):
             if best is None:
                 raise RuntimeError("no finite stage validation checkpoint")
             model.load_state_dict(best, strict=True)
-            # Warm-start selected weights, reset Adam next stage as in Flow code.
-            stage, step, opt, sched, best, best_score = stage+1, 0, None, None, None, float("inf")
+            # The GNN source retains moments/scheduler even when restoring earlier weights.
+            stage, step, best, best_score = stage+1, 0, None, float("inf")
+            if t.get("optimizer_policy", "gnn_persistent") == "flow_reset" or stage == len(stages):
+                opt = sched = None
             save()
         save(complete=True)
         return True

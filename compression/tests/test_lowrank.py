@@ -101,3 +101,24 @@ def test_asvd_unscales_and_does_not_enter_constrained_projection():
     scale = torch.rand(9)+0.5
     a, b = factors(w, 3, scale)
     torch.testing.assert_close((a@b)*scale, project(w*scale, 3))
+
+
+
+def test_export_rejects_dense_weights_labeled_as_factors(tmp_path):
+    from tiny_clm.model import export_model
+    from tiny_clm.smoke import tiny_model
+    from tiny_clm.lowrank import select
+    model = tiny_model()
+    ranks = select(model, {"kind": "mlp", "keep": .5})
+    with pytest.raises(ValueError, match="physical factors"):
+        export_model(model, tmp_path/"export", ranks)
+
+
+def test_explicit_ranks_do_not_require_keep_and_invalid_layer_ids_fail():
+    from tiny_clm.smoke import tiny_model
+    from tiny_clm.lowrank import select
+    model = tiny_model()
+    ranks = select(model, {"kind": "down", "layer_ids": [0], "keep": .5})
+    assert select(model, {"kind": "down", "layer_ids": [0], "ranks": ranks}) == ranks
+    with pytest.raises(ValueError):
+        select(model, {"kind": "down", "layer_ids": [True], "keep": .5})

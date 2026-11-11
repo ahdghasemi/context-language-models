@@ -7,6 +7,7 @@ import subprocess
 import sys
 from tiny_clm.io import digest, read_json, write_json
 from tiny_clm.evaluate import evaluate
+from tiny_clm.provenance import verify_snapshot
 
 p = argparse.ArgumentParser()
 p.add_argument("--manifest", required=True)
@@ -14,6 +15,7 @@ p.add_argument("--selection", required=True)
 p.add_argument("--stage", choices=["prepare", "evaluate", "aggregate"], required=True)
 a = p.parse_args()
 spec, selection = read_json(a.manifest), read_json(a.selection)
+verify_snapshot(spec["snapshot"], spec["snapshot_hash"])
 if selection["manifest_sha256"] != digest(spec):
     raise ValueError("selection is for a different campaign")
 if hashlib.sha256(subprocess.check_output([sys.executable, "-m", "pip", "freeze"])).hexdigest() != spec["environment"]["freeze_sha256"]:
