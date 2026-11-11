@@ -49,6 +49,9 @@ used. ASVD is an independent exact-SVD implementation of the cited mechanism, no
 official-paper-result reproduction. It operates on the same audited MLP target set,
 uses actual parameter budgets and fails rather than randomizing a failed decomposition.
 
+First run the **baseline stage** (one original model, zero optimizer updates). Its
+CLM rewards must meet the provisional .50 floor before pilot submission.
+
 Pilot: seed 0, keeps .8/.6, **10 runs** including original/dense, paired SVD/SVD-recovery,
 ASVD-uniform and constrained. Main: keeps .8/.6/.4, trained seeds 0/1/2, original and
 deterministic post-hoc controls once per budget, adaptive ASVD once per budget: **31 runs**.
@@ -59,7 +62,7 @@ requested keep. If materially unmatched, report a size/quality frontier or add m
 budget points, not a method advantage from a different size.
 
 All trained controls share the original checkpoint, training tokens/order for a given
-seed, learning rate, stage lengths/reset schedule, precision and validation frequency.
+seed, learning rate, stage lengths/optimizer policy, precision and validation frequency.
 Constrained selects best validation augmented loss, while dense/factor recovery selects
 validation CE; this is explicit, source-derived algorithm behavior. Baseline tuning is
 limited, so superiority cannot be claimed from this default grid alone. Recovery rates
@@ -96,7 +99,10 @@ savings. Production cache interactions require a separate future backend experim
 
 ## Stage gates and final test
 
-Correctness must pass before smoke, and smoke before training arrays. Correctness
+Correctness must pass before smoke, and smoke before training arrays. The baseline
+reference campaign must pass its CLM competence gate before the pilot can be submitted.
+Main/ablation gates bind model and dataset revisions, loss/precision/optimizer settings,
+layer policy and decoding; changing a model ID alone cannot bypass a new pilot. Correctness
 includes the defining projection/gradient/deployment properties, original context mirror,
 generation/caches and restart. A random smoke only demonstrates software behavior.
 
@@ -142,7 +148,7 @@ family and trajectory length, not just pooled reward. Deterministic original/SVD
 controls are not relabeled as three independent training runs.
 
 `submit.py ablations` schedules one seed for original/dense, continuation versus constant
-weak/strong μ (identical reset/update counts), down-only versus attention selection, and
+weak/strong μ (identical optimizer policy/update counts), down-only versus attention selection, and
 their matched SVD-recovery controls: 9 runs. Down keep .4 and attention keep .7 approximately
 match all-MLP keep .8 whole-model size; use actual counts to check. Constant μ is explicitly
 an ablation of continuation. The main grid already tests compression budget. Replicate
@@ -155,3 +161,11 @@ training cost. If NLL collapses before export, suspect optimization/data/schedul
 export collapses, the coupling has not closed the deployment gap. If quality survives
 but runtime slows, investigate the backend/kernel sizes rather than claiming algorithmic
 speedup. Negative cases remain in tables and plots.
+
+
+Budget counter: both methods explicitly use o200k_base with the CLM served-token ratio
+calibration disabled. The preparation job downloads the exact counting vocabulary and
+records its hash; missing caches fail before episodes rather than silently selecting
+character-count fallbacks. Qwen native token totals are reported separately, so a 32768
+benchmark-token budget must not be described as exactly 32768 native Qwen tokens.
+The mode comparison retains each upstream method's own prompt and finish behavior.

@@ -151,12 +151,15 @@ def run(artifact, config, lock_path, output, device="cuda"):
         raise RuntimeError("Harbor needs the singularity compatibility executable from Apptainer")
     spec = read_json(Path(artifact)/"compression.json")
     env = dict(os.environ, OPENAI_API_KEY="EMPTY",
+               LITELLM_LOCAL_MODEL_COST_MAP="True", NO_PROXY="*", no_proxy="*",
                TIKTOKEN_CACHE_DIR=lock["budget_tokenizer_cache"]["path"],
                TIKTOKEN_ENCODING=cb.get("budget_tokenizer", "o200k_base"),
                CLM_TOK_RATIO="1" if cb.get("calibrate_budget", False) else "0",
                PYTHONPATH=lock["source"]+os.pathsep+os.environ.get("PYTHONPATH", ""))
     # Check both upstream counters in the exact subprocess environment before serving.
-    check = ("from clm_harness.utils import tokens as a; from contextbench import tokens as b; "
+    check = ("from clm_contextbench import ClmStream; "
+             "from contextbench.harbor.agents.base import ContextBenchAgent; "
+             "from clm_harness.utils import tokens as a; from contextbench import tokens as b; "
              "assert a.count_tokens([])[1] == b.count_tokens([])[1] == 'tiktoken:o200k_base'")
     subprocess.run([sys.executable, "-c", check], env=env, check=True)
     episodes = []

@@ -131,12 +131,34 @@ require your authorized HF credentials via the normal token mechanism; never pla
 in Git, config JSON, logs or an sbatch command line. Default assets were public during
 local verification. Data/model licenses remain those of their providers.
 
-## 4. Pilot, logs and recovery
+## 4. Establish the dense baseline, then run the pilot
+
+The baseline stage runs the original dense checkpoint through export, general validation,
+profiling and both ContextBench modes with zero optimizer updates. If it cannot reach
+reward .50 on each pilot CLM task, compression quality is not yet interpretable. The
+pilot submission requires its passing gate:
+
+```bash
+python compression/submit.py baseline --config compression/configs/pilot.json \
+  --campaign "$TINY_CLM_RUNS/baseline-001"
+python compression/submit.py baseline --config compression/configs/pilot.json \
+  --campaign "$TINY_CLM_RUNS/baseline-001" --submit
+# Wait for completion; inspect logs and this gate before proceeding.
+cat "$TINY_CLM_RUNS/baseline-001/summary/gate.json"
+```
+
+If this gate fails, inspect the dense trajectories and compatibility errors first.
+Do not lower the floor merely to let a sweep run. A new backbone/protocol requires new
+preparation and baseline evidence.
+
+Pilot, logs and recovery:
 
 ```bash
 python compression/submit.py pilot --config compression/configs/pilot.json \
+  --baseline-gate "$TINY_CLM_RUNS/baseline-001/summary/gate.json" \
   --campaign "$TINY_CLM_RUNS/pilot-001"
 python compression/submit.py pilot --config compression/configs/pilot.json \
+  --baseline-gate "$TINY_CLM_RUNS/baseline-001/summary/gate.json" \
   --campaign "$TINY_CLM_RUNS/pilot-001" --submit
 export TINY_CLM_CAMPAIGN="$TINY_CLM_RUNS/pilot-001"
 cat "$TINY_CLM_CAMPAIGN/jobs.json"
@@ -188,7 +210,7 @@ python compression/resume.py --manifest "$TINY_CLM_CAMPAIGN/manifest.json" --ind
 python compression/resume.py --manifest "$TINY_CLM_CAMPAIGN/manifest.json" --indices 8 --from-stage train --submit
 ```
 
-The resume driver retains the old snapshot, rejects active original jobs and requires
+The resume driver retains the old snapshot, rejects active original and previous retry jobs and requires
 an incomplete checkpoint. Completed training with a failed export uses `--from-stage export`;
 single failed downstream stages use `evaluate`, `profile` or `contextbench`. Keep the old
 logs/failure record. ASVD sensitivity initialization is not checkpointed mid-search; a
@@ -266,7 +288,9 @@ failed outputs as above. Never turn repeated test attempts into model selection.
 ## 7. Safe updates
 
 Every submitted campaign runs `git archive` at a fixed commit in a separate read-only-file
-snapshot. It does not execute from the mutable checkout. Source commits, configs,
+snapshot. Its file hash manifest is checked before reuse and before each job executes;
+row configs are compared against the campaign manifest. This detects accidental edits,
+not a security boundary against a user deliberately replacing all manifests. It does not execute from the mutable checkout. Source commits, configs,
 environment freeze and asset hashes are recorded; jobs verify environment and assets.
 Do not edit snapshots, environment or shared assets underneath running jobs.
 
@@ -284,3 +308,29 @@ git worktree add --detach "$TINY_CLM_PARENT/context-language-models-${TINY_CLM_N
 Use that new worktree and a new frozen environment for subsequent campaigns when
 dependencies change. Existing campaigns resume against their old manifest/snapshot.
 No `git pull`, editable install update, or checkpoint/cache overwrite occurs in jobs.
+
+
+## Additional fixed settings and tunable resources
+
+Every stage supports `TINY_CLM_<STAGE>_CPUS`, `_MEM`, and `_TIME` overrides; for example
+`TINY_CLM_SMOKE_MEM=12G` or `TINY_CLM_EXPORT_TIME=02:00:00`. Stage names are ENVIRONMENT,
+CORRECTNESS, SMOKE, PREPARE, TRAIN, EXPORT, EVALUATE, PROFILE, CONTEXTBENCH and AGGREGATE.
+The environment check defaults to 15 minutes; small CPU checks to 30 minutes. Resource
+flags appear exactly once in dry runs. The implemented process mapping is always one
+task on one GPU; changing GPU count above one is rejected, not silently ignored.
+
+The ContextBench preparation also caches and hashes o200k_base. It is passed to both
+agents through each job's environment. `calibrate_budget=false` pins the common benchmark
+token ruler; actual Qwen token usage remains in episode logs. Re-run preparation in a new
+destination if migrating a lock created by the earlier branch revision: old locks without
+this cache are intentionally rejected.
+
+Initial and periodic training checkpoints are atomic. In `gnn_persistent` mode Adam
+moments survive intermediate stage boundaries; only completed runs discard them.
+GPU numerical reproducibility still depends on the hardware and library kernels.
+
+Local inference disables proxy routing (`NO_PROXY=*`) and sets
+`LITELLM_LOCAL_MODEL_COST_MAP=True` in the episode subprocess environment. This prevents
+an unrelated pricing-map download at import time on compute nodes. It does not supply
+credentials or contact an external model API. The readiness check imports both original
+agent classes as well as checking their budget counters.

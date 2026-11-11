@@ -3,8 +3,8 @@
 Audit date: 2026-11-11. Implementation baseline: user fork
 `ahdghasemi/context-language-models`, default branch `main`, starting commit
 `483198229ab7b90c0eed4651306ab3b3505aaf50`. The upstream HEAD and fork HEAD matched at
-inspection; no material fork divergence affected the implementation. The new feature
-branch is `tiny-clm-constrained`. Upstream files are preserved except the README link,
+inspection; no material fork divergence affected the implementation. The existing feature branch `tiny-clm-constrained` was retrieved at
+`624369b637988eb7e06550395494406e99a4396d` and extended without rewriting history. Upstream files are preserved except the README link,
 optional dependencies/package registration, and ignore rules.
 
 ## Evidence inspected
@@ -16,12 +16,12 @@ archive was not used to implement the proposed method.
 
 | Artifact | Relevant source locations | SHA-256 of supplied attachment |
 |---|---|---|
-| `IEEE_TSP.pdf` | Section III-A, Eqs. (7)–(14), Algorithm 1; complexity discussion | `a1c47bf1c46954c931c6851c6f1bee89be0294c5a997ae1e3f038a97c9b2bf63` |
-| `IEEE_TSP.zip` | `bare_jrnl_new_sample4_Ahmad_v3.tex`; nested `code/Constrained.zip` | `cba657d905f91ead5acba2c3fafd67dd732705b0efbb098c6a106e760795e4d3` |
-| `CLM_arXiv.pdf` | Context-as-file, zero-shot/RL, SCR, evaluation and appendix settings | `ac5c926814434d8ad2f499183cd2a81e53b4c14f327587f99980ade9157db01b` |
-| `22968_Context_Language_Models.pdf` | Alternate supplied CLM manuscript; architecture/system and evaluation | `c02490993efc92c5b64aeeb6e473ce2906dd763e172004b39dd6217d3336b685` |
-| `Tiny_Flow_Matching_For_MLSP__Copy_clean_for_slide_prepration_(2).pdf` | Constrained OT-CFM and factor deployment | `6c8a2a2d4fabf613474225de86bf0ebb8c2dd647f87a672cb9d1722a4bff6dbf` |
-| `Tiny_Flow_Matching_For_MLSP__Copy_clean_for_slide_prepration_(1).zip` | `mlsp_template_camera_ready_v7.tex`; `code/tiny_flow_matching_repro_final_v1.zip` | `71c7adaedb7c310a5513946bcd91ddf9b1def2cbd20f5251d5bd981b68ef9660` |
+| `IEEE_TSP(1).pdf` | Section III-A, Eqs. (7)–(14), Algorithm 1; complexity discussion | `a1c47bf1c46954c931c6851c6f1bee89be0294c5a997ae1e3f038a97c9b2bf63` |
+| `IEEE_TSP(1).zip` | `bare_jrnl_new_sample4_Ahmad_v3.tex`; nested `code/Constrained.zip` | `cba657d905f91ead5acba2c3fafd67dd732705b0efbb098c6a106e760795e4d3` |
+| `CLM_arXiv(1).pdf` | Context-as-file, zero-shot/RL, SCR, evaluation and appendix settings | `ac5c926814434d8ad2f499183cd2a81e53b4c14f327587f99980ade9157db01b` |
+| `22968_Context_Language_Models(1).pdf` | Alternate supplied CLM manuscript; architecture/system and evaluation | `c02490993efc92c5b64aeeb6e473ce2906dd763e172004b39dd6217d3336b685` |
+| `Tiny_Flow_Matching_For_MLSP__Copy_clean_for_slide_prepration_(3).pdf` | Constrained OT-CFM and factor deployment | `6c8a2a2d4fabf613474225de86bf0ebb8c2dd647f87a672cb9d1722a4bff6dbf` |
+| `Tiny_Flow_Matching_For_MLSP__Copy_clean_for_slide_prepration_(2).zip` | `mlsp_template_camera_ready_v7.tex`; `code/tiny_flow_matching_repro_final_v1.zip` | `71c7adaedb7c310a5513946bcd91ddf9b1def2cbd20f5251d5bd981b68ef9660` |
 
 GNN code below means the extracted `Constrained/` directory. Flow code means
 `tiny_flow_matching_repro/` inside its nested archive. These paths are source references,
@@ -41,7 +41,7 @@ Algorithm 1 is **Gradual low-rank GNN training**. No new acronym is assigned her
 | Best-loss pseudocode omits updating its minimum | Algorithm 1 initializes L_min but does not assign the new L_min | Follow executable best-score tracking. Otherwise the selected iterate would not actually be the best. |
 | Abstract subproblem argmin is not an exact neural minimizer | Algorithm 1 vs `utils.py:183–204` | One stochastic Adam update per newly projected proxy, as executed in source. No convergence-to-global-optimum claim. |
 | Stage selection differs between transfers | GNN `test_proximal` returns task and task+penalty, latter selected in driver; Flow selects sampled training CFM loss | Use held-out **validation** NLL+penalty for constrained stage selection. The GNN variable called `test_loader` is not a license to tune our final test set. |
-| Optimizer history differs | GNN Adam/StepLR persist through best-weight restoration; Flow Adam/cosine reset every stage | Use the explicit Flow reset convention; document as a transfer choice. Restored best weights start a fresh stage optimizer. |
+| Optimizer history differs | GNN Adam/StepLR persist through best-weight restoration; Flow Adam/cosine reset every stage | Default `gnn_persistent` retains Adam/StepLR state across best-weight restoration, matching the GNN driver. `flow_reset` explicitly selects fresh Adam/cosine per stage as a separate ablation. |
 | Flow selection timing | Flow `train.py:47–58` compares pre-update sampled CFM loss and saves post-update weights | Do not copy this noisy/misaligned selection. Evaluate the exact saved post-update state on held-out blocks. |
 | Stage rounding can exceed nominal epochs | GNN logarithmic ceil count; Flow ceil(total/stages) | Configure a fixed number of optimizer updates per stage; totals are explicit and matched across trained controls. |
 | Truncation does not make full SVD cheap | GNN `torch.svd(..., some=False)`; Flow reduced full SVD | New exact reduced full SVD costs O(mn min(m,n)), not O(mnr). GPU workspace/runtime must be measured. |
@@ -105,9 +105,10 @@ during the local downloads; a changed gated model requires your own authorized H
 
 **A faithful constrained backbone-compression experiment is feasible. A reproduction of
 the original RL-trained CLM is not currently justified.** The code now provides the
-former, with the original context-management interface. Preliminary real-model language
-generation and tool-call formatting worked; long-horizon context management remains
-unvalidated. If the small dense model cannot handle the pilot CLM tasks, increasing the
+former, with the original context-management interface. Real checkpoint loading and limited teacher-forced language evaluation were re-executed.
+The two original agent classes construct successfully with the pinned environment;
+long-horizon context management remains unvalidated. Earlier generation observations
+are preserved only in the explicitly historical report. If the small dense model cannot handle the pilot CLM tasks, increasing the
 backbone capability or obtaining the original trained checkpoint is required before
 claiming CLM retention. That failure must not be hidden by reporting only perplexity.
 
@@ -115,3 +116,21 @@ Missing/unavailable here: a supplied trained CLM-RL checkpoint, full RL training
 authoritative GNN/Flow archived experiment logs, Unity credentials/association/GPU
 allocation, a local CUDA device, and a working local Apptainer/Singularity runtime.
 These block particular reproductions/measurements, not the source-grounded implementation.
+
+## Additional reproducibility findings in this revision
+
+The two supplied CLM abstracts report different skill-evolution gains: 35.9 points in
+the arXiv PDF and 26.9 in the anonymous manuscript. They are distinct versions; neither
+number is a target for this substitute-backbone experiment. No empirical number was
+reconciled by assumption.
+
+`clm_harness/utils/tokens.py` and `ContextBench/contextbench/tokens.py` both prefer
+`o200k_base`, but fall back to **different** character estimates (chars/4 and chars/3)
+when their encoding cannot load. The new preparation stage therefore materializes a
+hashed tokenizer cache, and evaluation checks both exact counters before starting.
+The CLM budget controller's header says uncalibrated deterministic counting, but its
+actual `count`/`calibrate` methods optionally apply a served-token ratio. We explicitly
+set `CLM_TOK_RATIO=0` for the primary two-mode comparison, so both use the benchmark's
+fixed o200k ruler; native Qwen prompt counts are separately logged. This is a disclosed
+harness setting, not a change to the original harness implementation. The model's native
+40960-token safety limit still applies, and a mismatch/overflow remains visible.

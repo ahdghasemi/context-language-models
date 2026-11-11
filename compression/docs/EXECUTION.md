@@ -1,178 +1,188 @@
-# Execution and evidence report
+# Current execution and evidence report
 
-Date: 2026-11-11. Development started at
-`483198229ab7b90c0eed4651306ab3b3505aaf50`; measurements made before the delivery commits
-record that starting SHA with `dirty=true`. They are not falsely attributed to a clean
-release commit. Future Slurm campaigns require clean committed code and record their
-exact immutable snapshot. Delivery commits are available in the feature-branch history.
+Date: 2026-11-11 (user timezone). This revision started from the existing feature branch
+at `624369b637988eb7e06550395494406e99a4396d`; the fork/upstream default branches were both
+`483198229ab7b90c0eed4651306ab3b3505aaf50`. The earlier branch's report is retained as
+[PRIOR_EXECUTION_REPORT.md](PRIOR_EXECUTION_REPORT.md), explicitly historical. Its raw
+measurements were not present in Git and are not treated as current observations.
 
-## Status
+The core audit/fixes were committed and pushed as
+`6ba02ba536b567c5d7222ca19a259f463fdf8ddb`. Final documentation and the additional offline
+agent initialization fix are in the subsequent branch commit. The delivery response
+identifies that exact final SHA. No default-branch/upstream commit was changed.
 
-| Item | Implemented | Executed here | Outcome / limit |
+## What changed in this revision
+
+* Reconstructed the supplied GNN equation/code and Flow transfer again. Default training
+  now retains GNN Adam/StepLR state across penalty stages; Flow Adam/cosine resets remain
+  an explicit alternative. Initial, periodic and stage-boundary checkpoints preserve the
+  state needed by the selected policy.
+* Added a required dense CLM baseline stage before pilot submission; bound pilot-to-main
+  gates to model/data revisions and protocol settings. Empty/duplicate/mismatched episode
+  summaries cannot masquerade as a complete experiment.
+* Added hashed source snapshots and configuration checks before execution; strengthened
+  retry detection to include previous resubmission jobs; made all stage resources tunable.
+* Enforced physically factorized modules at export and corrected explicit rank overrides.
+* Materialized the benchmark counting vocabulary; pinned the same o200k budget ruler for
+  both modes; prevented offline pricing downloads/proxy routing for localhost inference.
+* Preserved original CLM files and their baseline entry points. The extension remains
+  under `clm/tiny_clm` and `compression`.
+
+## Observed status
+
+| Item | Implemented | Executed this revision | Outcome / limitation |
 |---|---|---|---|
-| Supplied paper/LaTeX/code audit | Yes | Yes | Exact Constrained mechanism and material disagreements documented |
-| Target fork retrieval/read/write access | Yes | Yes | Clone and authenticated feature-branch creation succeeded; no upstream/default-branch update |
-| Projection, gradient, factor, tying, save/load, generation/cache tests | Yes | Yes | Passed on CPU |
-| Restart/config collision and matched-token controls | Yes | Yes | CPU resumed weights match uninterrupted weights bitwise |
-| HTTP/native tool parsing and upstream context-file contract | Yes | Yes | Passed software tests; malformed tool calls remain visible |
-| Slurm dependency/grid/failure/task-integrity tests | Yes | Yes, planner/unit tests | Passed; no actual scheduler available |
-| Complete test suite | Yes | Yes | **33 passed**, one upstream Starlette/AnyIO deprecation warning |
-| Random tiny end-to-end smoke | Yes | Yes | Train → physical export → reload → evaluation → profile passed; software only |
-| Public model/data preparation | Yes | Yes | Real pinned weights/tokenizer and native dataset splits loaded |
-| Real uncompressed language/interface check | Yes | Yes | Limited NLL and native text/tool-call formatting worked; no tool execution |
-| Real post-hoc SVD export | Yes | Yes | Physically smaller and reload-exact; language quality failed badly |
-| Real-model constrained/recovery/ASVD training | Yes | **No** | No CUDA, insufficient local RAM for full optimizer footprint |
-| Original ContextBench task packaging | Yes | Yes, without container | 4 pilot and 15 main task manifests generated; marked non-runnable |
-| Apptainer build and original CLM/append-only episodes | Yes | **No** | No local Apptainer/Singularity or Unity allocation |
-| Main/final-test Slurm campaigns | Yes | **No** | Dependency planning/static tests only |
-| CUDA deployment profiling | Yes | **No** | No GPU measurements, speedup or VRAM-retention claim |
-| Real dense vs post-hoc CPU profiling | Yes | Yes | Smaller SVD weights, lower observed decoding throughput; diagnostic shared CPU environment |
-| Aggregation/plot/frozen held-out workflow | Yes | Partly | Missing-run aggregation tested; actual complete CLM campaign/plots/final tests not run |
+| Supplied PDF/LaTeX/nested source audit | Yes | Yes | Hashes match attached inputs; algorithm page visually inspected |
+| GitHub retrieval and dedicated-branch writes | Yes | Yes | Existing branch continued; core remote tree equals local staged tree |
+| Projection/gradient/rank/factor/tying/save-load/cache/generation tests | Yes | Yes | Passed on CPU |
+| Optimizer-policy restart and actual SIGUSR1 checkpoint test | Yes | Yes | Passed; both policies resume bitwise on the CPU fixture |
+| Snapshot, configuration, budget, gate and scheduler dependency tests | Yes | Yes | Passed; scheduler submission is simulated in tests |
+| Full inexpensive test suite | Yes | Yes | **43 passed**, one upstream Starlette/AnyIO deprecation warning |
+| End-to-end random-weight smoke | Yes | Yes | 6 updates, export/reload/NLL/profile passed; software only |
+| Pinned real model and WikiText acquisition | Yes | Yes | Weights, tokenizer and train/validation/test blocks prepared |
+| Real dense NLL and SVD residual audit | Yes | Yes | First two validation blocks only; final test not evaluated |
+| Real original and post-hoc SVD export/reload | Yes | Yes | Smaller SVD artifact; very poor post-hoc language quality |
+| Real original vs SVD CPU profiling | Yes | Yes | Short diagnostic workload; see measurements below; no GPU claim |
+| Original ContextBench task generation | Yes | Yes | 4 pilot and 15 main tasks; deliberately marked non-runnable without container |
+| Both original agent classes and exact budget counters | Yes | Yes | Import/construction and tokenizer checks passed after offline fix |
+| Real constrained/recovery/ASVD training | Yes | **No** | No CUDA; full optimizer/proxy footprint exceeds local RAM headroom |
+| Apptainer/container and complete CLM episodes | Yes | **No** | No installed Apptainer/Singularity runtime or Unity session |
+| Unity environment/pilot/main/final-test submissions | Yes | **No** | Dry-run planning and simulated dependencies only |
+| Complete experimental aggregation/figures | Yes | Partly | Missing-result handling tested; no completed scientific campaign to plot |
 
-Environment: Linux x86_64 runtime, Python 3.12.14, PyTorch 2.8.0+cpu, Transformers
-4.57.1, datasets 4.4.1, HF hub 0.36.2, safetensors 0.8.0, NumPy 2.3.4, Harbor 0.16.1,
-LiteLLM 1.109.0. Thread counts were fixed to 2. No CUDA device; `/proc/meminfo` reported
-10,206,472 kB total RAM. `lscpu` could not access the virtualized CPU inventory, so a CPU
-model name is not asserted. These are local diagnostic results, not Unity benchmarks.
+Environment: Python 3.12.14, PyTorch 2.8.0+cpu, Transformers 4.57.1, datasets 4.4.1,
+HF hub 0.36.2, safetensors 0.8.0, NumPy 2.3.4, Harbor 0.16.1, LiteLLM 1.109.0. Native
+CPU math thread counts were two. `/proc/meminfo` reported 10,206,468 kB total RAM.
+No GPU, Slurm executable or container runtime was available. `pip check` passed.
+Syntax compilation, shell parsing, `git diff --check`, and Ruff E9/F checks passed.
+A broader Ruff style pass reports pre-existing/import-order/style suggestions; it is
+not reported as clean. No style-only wholesale rewrite was applied.
 
-## Observed numerical results
+## Measured diagnostics, not compression-training results
 
-The random tiny Qwen fixture trained 6 optimizer updates / 180 scored tokens. Parameter
-count fell from 20,672 to 14,144; random validation NLL was 4.161430. This says nothing
-about useful language or CLM retention.
+Model: `Qwen/Qwen3-0.6B` revision `c1899de289a04d12100db370d81485cdf75e47ca`.
+Data: `Salesforce/wikitext`, `wikitext-2-raw-v1`, revision
+`b08601e04326c79dfdd32d625aee71d232d685c3`. Preparation produced 2048 train, 64 validation
+and 128 final-test blocks of 512 tokens. Final-test bytes were prepared but never scored.
 
-Actual Qwen3-0.6B model revision was
-`c1899de289a04d12100db370d81485cdf75e47ca`; WikiText revision was
-`b08601e04326c79dfdd32d625aee71d232d685c3`. Preparation produced 2,048 train, 64 validation
-and 128 test blocks of 512 tokens. Test blocks were prepared but **not evaluated**.
+The random model smoke reduced parameters from 20,672 to 14,144 and produced NLL
+4.159977 on random validation data. This is not useful-language evidence.
 
-The following is a **two-validation-block diagnostic**, 1,022 scored tokens, same native
-tokenizer and BF16 exported weights. It is not a pilot-quality table and does not include
-the proposed constrained method:
+The real-model diagnostic uses **only 2 validation blocks / 1,022 scored tokens**.
+It is not a full benchmark, and neither row has any optimizer updates:
 
-| Control | Unique parameters | Serialized weight bytes | NLL | Perplexity |
+| Control | Unique parameters | BF16 serialized weight bytes | NLL | Perplexity |
 |---|---:|---:|---:|---:|
-| Original dense | 596,049,920 | 1,192,135,112 | 2.83405304 | 17.01428 |
-| Post-hoc SVD, all MLP keep .8, rank 614 | 543,064,064 | 1,086,173,520 | 11.70345831 | 120,989.41 |
+| Original dense | 596,049,920 | 1,192,135,112 | 2.83301187 | 16.99658 |
+| Post-hoc SVD, all MLP keep .8, rank 614 | 543,064,064 | 1,086,173,520 | 11.70195723 | 120,807.93 |
 
-The SVD artifact is 8.8895% smaller in parameter count but is **not useful compression**
-on this diagnostic. No recovery updates were applied. Its export/reload maximum logit
-error was 0.0; its before/after *serialization* gap was also zero because this control
-was already factorized before export. That zero does not conceal the large dense-to-SVD
-quality loss. The earlier FP32 dense diagnostic was NLL 2.83403063 / PPL 17.01390.
-Neither measurement establishes long-horizon CLM capability.
+SVD reduced whole-model parameters by 8.8895% and the selected weights by about 20.05%.
+Its degradation is severe. Serialization/reload error was exactly zero for both rows.
+The SVD export's zero serialization gap is not a dense-to-SVD quality comparison: that
+control was already factorized before export. The dense-vs-SVD table captures the loss.
+The proposed constrained method's real deployment gap has **not** been measured.
 
-Real BF16 CPU reference profiling used batch 1, 32 fixed decoding steps, 2 warmups and
-5 measured repeats per prompt length, with 2 threads, sequentially in the same runtime:
+The separate FP32 dense audit gave NLL 2.83404303 / PPL 17.01411. Exact reduced SVD of all
+84 original MLP matrices took 71.53 seconds and peak process RSS reached 4,843,216,896
+bytes. Squared-tail sums at keep .8/.6/.4 were 29,423.5575 / 53,963.9702 / 88,925.7371.
+These are initial-weight diagnostics without backward passes or retained full proxy sets.
 
-| Control | Prompt tokens | Median prefill seconds | Decode tokens/second |
-|---|---:|---:|---:|
-| Dense | 128 | 0.6501 | 9.8273 |
-| SVD keep .8 | 128 | 0.6129 | 8.6012 |
-| Dense | 512 | 3.1710 | 6.5765 |
-| SVD keep .8 | 512 | 3.4025 | 6.0414 |
+The two artifacts were subsequently profiled **sequentially**, with BF16 CPU weights,
+two math threads, batch size 1, 128 prompt tokens and 4 forced decode steps. Each used
+two warmups and three timed repetitions. This short shared-host diagnostic is not a
+representative serving benchmark or a confidence interval across independent runs.
 
-Dense resident parameter bytes were 1,192,099,840 versus 1,086,128,128 for factors.
-KV cache bytes were identical: 18,350,080 / 62,390,272 at prompt lengths 128 / 512 plus
-32 decode steps. Peak process RSS was 2,695,090,176 / 2,595,065,856 bytes for dense / SVD;
-this includes loading, not isolated activation memory. Decoding was slower for factors
-in these observations; the 128-token prefill difference is small relative to observed
-variation (sample SD about .10 s). CPU allocation/exclusivity and physical model name
-were unavailable. These are reference CPU diagnostics, not evidence of GPU performance
-or a stable production speed ranking. Raw repeated samples remain in local profile JSONs.
+| CPU diagnostic | Dense | Post-hoc SVD |
+|---|---:|---:|
+| Median prefill seconds | 4.29245 | 4.62378 |
+| Median seconds for 4 decode steps | 0.81987 | 1.11631 |
+| Decode tokens/second (median-derived) | 4.8788 | 3.5832 |
+| Peak process RSS bytes | 2,711,965,696 | 2,608,226,304 |
+| Observed KV cache bytes | 15,138,816 | 15,138,816 |
 
-The real dense reference generated `hello` on a one-word request, and produced a native
-`bash` tool call with JSON argument `{"command":"pwd"}` when requested. The command was
-**not executed**. This verifies a narrow generation/serialization path, not tool success,
-context editing or an evaluated CLM episode.
+The factorized control was smaller but slower in these measurements. RSS includes
+process/framework/loading allocations and is not isolated model or activation memory.
+Compression of MLP weights does not reduce the KV dimensions. Raw timing samples are
+included in the supplementary execution evidence. An earlier concurrent timing probe
+was excluded from this comparison. No GPU speedup or system-task latency was measured.
 
-Full reduced SVD of all 84 original MLP matrices took 55.33 seconds on CPU, peak RSS
-4,820,869,120 bytes, without backpropagation or retained proxies. Initial summed squared
-tail errors at keeps .8/.6/.4 were 29,423.5572 / 53,963.9696 / 88,925.7379. These measurements
-motivate the penalty audit and resource cautions in the specification. A small deployment
-artifact does not imply a cheap compression-training procedure.
+## Commands actually executed
 
-## Commands and validation scope
-
-The working checkout was `.../context-language-models`, the venv `../.venv` and diagnostic
-outputs `../checks/`. The following commands were actually executed (outputs remained
-outside Git):
+Paths below are relative to the repository root; `../checks` contains local outputs.
 
 ```bash
-git clone https://github.com/ahdghasemi/context-language-models.git
-git checkout -b tiny-clm-constrained
-../.venv/bin/python -m pip install -e '.[compression]'
-OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 PYTHONPATH=clm ../.venv/bin/python -m pytest -q \
-  compression/tests clm/tests/test_context_string.py --junitxml=../checks/final-correctness.xml
-../.venv/bin/python -m pip check
-../.venv/bin/ruff check clm/tiny_clm compression
-python -m compileall -q clm/tiny_clm compression
-bash -n compression/setup_unity.sh compression/slurm/job.sbatch compression/slurm/final_test.sbatch
-git diff --check
-python compression/submit.py pilot --campaign /tmp/tiny-clm-dry-run
-python compression/submit.py main --config compression/configs/main.json --campaign /tmp/tiny-clm-main-dry-run
-python compression/submit.py ablations --campaign /tmp/tiny-clm-ablation-dry-run
+git clone https://github.com/ahdghasemi/context-language-models.git context-language-models
+git switch -c tiny-clm-constrained --track origin/tiny-clm-constrained
+python -m venv .venv
+.venv/bin/python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+.venv/bin/python -m pip install -r compression/requirements.txt
+.venv/bin/python -m pip install --no-deps -e .
+.venv/bin/python -m pip install harbor==0.16.1 -r compression/requirements.txt
+OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 .venv/bin/python -m pytest -q \
+  compression/tests clm/tests/test_context_string.py --junitxml=../checks/correctness-final.xml
+OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 .venv/bin/python -m tiny_clm.smoke --output ../checks/smoke
+OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 HF_HOME=/workspace/scratch/ee03ac542625/cache/hf \
+  HF_DATASETS_CACHE=/workspace/scratch/ee03ac542625/cache/data \
+  .venv/bin/python -m tiny_clm.cli prepare --config compression/configs/pilot.json \
+  --destination ../checks/real-assets
+OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 .venv/bin/python compression/audit_backbone.py \
+  --assets ../checks/real-assets/assets-lock.json --output ../checks/real-backbone-audit.json --svd
 ```
 
-`tiny_clm.smoke` was run to `../checks/smoke`. Asset preparation was executed through the
-CLI with project-local HF/data caches. The original preparation requested `main`, resolved
-and saved the exact revisions above; released configs now pin those resolved revisions.
-Read-only Python calls loaded that manifest for the first dense/interface/SVD-residual
-audits. `compression/audit_backbone.py` packages that read-only model/NLL/SVD audit for
-reproduction; it is not a trainer. The task builder was called programmatically with
-`skip_container=True`, which explicitly writes `runnable=false`.
-
-The real post-hoc diagnostic copied the pilot config to `../checks/real_svd_diagnostic.json`,
-set `method=svd`, CPU precision FP32 and validation_batches=2, and retained the already
-resolved asset request. The dense diagnostic changed only `method=original`. Both export
-BF16. Actual commands:
+Diagnostic configs were copied from pilot and changed to `method=original` or `svd`,
+`training.precision=float32`, and `training.validation_batches=2`; export remained BF16.
+For each method, the following commands ran with OMP/MKL threads set to two:
 
 ```bash
-OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 ../.venv/bin/python -m tiny_clm.cli train \
-  --config ../checks/real_svd_diagnostic.json --assets ../checks/real_assets/assets-lock.json \
-  --run ../checks/real_svd_run --device cpu
-OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 ../.venv/bin/python -m tiny_clm.cli export \
-  --run ../checks/real_svd_run --device cpu
-OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 ../.venv/bin/python -m tiny_clm.cli train \
-  --config ../checks/real_dense_diagnostic.json --assets ../checks/real_assets/assets-lock.json \
-  --run ../checks/real_dense_run --device cpu
-OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 ../.venv/bin/python -m tiny_clm.cli export \
-  --run ../checks/real_dense_run --device cpu
+.venv/bin/python -m tiny_clm.cli train --config ../checks/original-diagnostic.json \
+  --assets ../checks/real-assets/assets-lock.json --run ../checks/real-original --device cpu
+.venv/bin/python -m tiny_clm.cli export --run ../checks/real-original --device cpu
+.venv/bin/python -m tiny_clm.cli train --config ../checks/svd-diagnostic.json \
+  --assets ../checks/real-assets/assets-lock.json --run ../checks/real-svd --device cpu
+.venv/bin/python -m tiny_clm.cli export --run ../checks/real-svd --device cpu
 ```
 
-The CLI subcommand is named `train`, but these two methods execute **zero optimizer
-updates**; they must not be reported as fine-tuned models.
-
-Both real artifacts were also profiled with these actual commands:
+The profiling command ran for `original` followed by `svd`:
 
 ```bash
-OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 ../.venv/bin/python -m tiny_clm.cli profile \
-  --artifact ../checks/real_dense_run/export --output ../checks/real_dense_run/profile.json \
-  --lengths 128 512 --decode-tokens 32 --repeats 5 --device cpu
-OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 ../.venv/bin/python -m tiny_clm.cli profile \
-  --artifact ../checks/real_svd_run/export --output ../checks/real_svd_run/profile.json \
-  --lengths 128 512 --decode-tokens 32 --repeats 5 --device cpu
+for method in original svd; do
+  OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 .venv/bin/python -m tiny_clm.cli profile \
+    --artifact "../checks/real-$method/export" \
+    --output "../checks/real-$method/profile-sequential.json" \
+    --lengths 128 --decode-tokens 4 --repeats 3 --device cpu
+done
 ```
 
-## Failures, limitations and remaining evidence
+The subcommand name `train` does not imply optimization for `original` or `svd`: both
+record zero training tokens and zero optimizer steps. Metadata records the actual source
+HEAD and `dirty=true` while edits were in progress; these diagnostic runs are not falsely
+attributed to a clean final commit. Campaign jobs require clean committed snapshots.
 
-Initial test collection failed because installing the upstream base dependencies first
-selected HF hub 1.33, incompatible with the pinned Transformers requirement. Dependency
-resolution also exposed Harbor requirements for datasets>=4.4.1 and FastAPI>=.128. The
-compression extra/setup now pins a compatible combined environment; `pip check` passes.
-Torch's deprecated `torch_dtype` argument and the single Starlette test warning are
-nonfatal under the pinned versions.
+ContextBench was cloned at its configured revision and `tiny_clm.contextbench.prepare`
+was called for pilot/main with `skip_container=True`. The result explicitly has
+`runnable=false`. Both upstream counters were checked for exact o200k usage. Both
+`ClmStream` and `ContextBenchAgent` were constructed with a localhost endpoint; no actual
+agent episode or bash action was executed. CLI dry runs covered baseline, pilot, main
+and ablations. GitHub Git-data calls created the reviewed trees/commits and advanced only
+the feature ref with an expected-old-SHA lease and `force=false`.
 
-Shell `git push --dry-run` failed because this checkout had no HTTPS credential helper.
-Authenticated GitHub repository permissions did include push; the Git data API is used
-for creating commits and advancing only the dedicated branch, followed by remote fetch
-and content verification. Lack of shell credentials is not treated as lack of GitHub
-write access. Unity access remains absent regardless of GitHub access.
+## Failures and interpretation
 
-Before publication-level conclusions: run the allocated environment/container checks;
-establish dense CLM competence; train the constrained/recovery/ASVD grid; quantify real
-deployment gaps and quality frontiers; measure GPU memory/runtime on matched hardware;
-inspect failed and long-horizon episodes; freeze and execute held-out evaluation; broaden
-general capability assessment and repeat useful operating points over enough independent
-seeds. No constrained-model retention, GPU speedup, original RL reproduction or new
-theoretical guarantee has yet been established.
+* A first dependency-install command hit a log-directory creation race; retried after
+  the directory existed, and dependency validation passed. No experiment was lost.
+* The first actual CLM-agent import tried to fetch LiteLLM's remote cost map and failed
+  through an unsupported local SOCKS proxy configuration. The episode subprocess now
+  forces the bundled price map and disables proxy routing for localhost-only inference;
+  both agent classes then imported/constructed successfully. No model/API credential was used.
+* A single large GitHub create-tree request timed out (HTTP 422). Smaller incremental
+  trees succeeded, and the final remote tree matched `git write-tree` exactly before
+  publishing the commit. This was a transfer failure, not a failed training run.
+* PyTorch emits a `torch_dtype` deprecation notice under the pinned Transformers version;
+  the tested paths remain functional. The test suite emits one upstream deprecation warning.
+
+No evidence here establishes preserved CLM capability or an advantage for the constrained
+method. The useful next evidence is an allocated dense-baseline campaign, followed by
+constrained/recovery training only if that baseline is competent. Short pilots may fail
+because of insufficient optimization, so preserve residual/validation/deployment-gap
+logs and distinguish that from a fundamental method failure. Current baselines and tiny
+backbone scope do not justify a publication-level superiority or novelty claim.

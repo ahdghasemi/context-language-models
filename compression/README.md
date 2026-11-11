@@ -2,12 +2,13 @@
 
 This fork implements the **Constrained formulation** from the supplied GNN work:
 detached hard-rank auxiliary projections, an unnormalized squared-Frobenius coupling
-penalty scaled by **1/(2μ)**, and decreasing-μ continuation. The separately supplied
-Regularized method is not used. SVD, recovery training and ASVD are separately named controls.
+penalty scaled by **1/(2μ)**, and decreasing-μ continuation. The default preserves the
+original GNN Adam/StepLR state across stages. The separately supplied Regularized method is not used. SVD, recovery training and ASVD are separately named controls.
 
-**Evidence boundary:** CPU software validation and a small real uncompressed-model
-check have run. Real-model constrained training, ContextBench episodes, GPU profiling
-and Unity submission have **not** run. No retained CLM quality or deployment speedup
+**Evidence boundary:** 43 CPU tests, a random-weight smoke, real dense/SVD export and
+limited validation/profiling checks have run. The post-hoc SVD artifact was smaller but
+quality collapsed and the short CPU workload was slower. Real-model constrained training,
+ContextBench episodes, GPU profiling and Unity submission have **not** run. No retained CLM quality or deployment speedup
 has been demonstrated. See [execution report](docs/EXECUTION.md).
 
 CLM is a context-file-editing harness around a language model. This extension compresses
@@ -15,7 +16,7 @@ the neural backbone, while using the original `ClmStream` agent and ContextBench
 The pilot uses the general post-trained **Qwen3-0.6B**, not the paper's Qwen3.5-9B CLM-RL
 model. The supplied fork does not contain that trained checkpoint or its complete RL
 training system. Small-backbone competence must be established before compression results
-are interpretable; a failed dense CLM baseline blocks the main grid.
+are interpretable; a failed dense CLM baseline now blocks the pilot itself.
 
 ## Read and run
 

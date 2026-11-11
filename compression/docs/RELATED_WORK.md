@@ -25,6 +25,21 @@ survey or a priority claim.
   path needs a separate Qwen3 audit and matching budget/protocol. That is an implementation
   scope choice, not a claimed lack of publicly available code.
 
+* **SVD-LLM V2**, Wang et al., NAACL 2025,
+  [paper](https://arxiv.org/abs/2503.12340), same official SVD-LLM repository. It combines
+  nonuniform allocation based on theoretical truncation loss with loss-optimized truncation.
+  This is a stronger publication-level comparator than raw SVD; it has not been integrated
+  into this Qwen3/CLM protocol, and its results must not be claimed as reproduced.
+
+* **LEMS / KFAC-SVD**, Thoma et al., 2026,
+  [author project](https://lems-svd.github.io/). The current author source describes global
+  rank allocation with a calibrated error model and token-wise Fisher approximations,
+  including Qwen3 experiments. Its date/version and reported gains differ between indexed
+  manuscript and project pages, so no exact performance number is imported here. No LEMS
+  code or results were run. The initial implemented ASVD sensitivity control is reproducible,
+  but is insufficient by itself to establish superiority over the latest rank-allocation
+  work; adding a pinned official LEMS or SVD-LLM V2 control is required before such a claim.
+
 * **LowRankArena: A Standardized Evaluation Platform for SVD-Based LLM Compression**,
   Shao et al., August 2026,
   [paper](https://arxiv.org/abs/2608.26389),

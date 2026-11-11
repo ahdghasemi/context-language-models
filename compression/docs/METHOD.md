@@ -31,19 +31,19 @@ method is not a replacement by post-hoc SVD.
 
 ```text
 load pinned pretrained θ; fix selected matrices/ranks; seed sampler and RNGs
+initialize Adam and StepLR (step_size=stage_steps, factor=sqrt(γ))
 for μ in [μ_init, γ μ_init, ...] while μ >= μ_min:
-    initialize fresh Adam and cosine scheduler (Flow reference convention)
     best_score = infinity
     for exactly stage_steps optimizer updates:
         for each selected matrix: V_s = stop_gradient(P_rank<=r_s(W_s))
         zero gradients
         accumulate mean CE gradients across equal-sized microbatches
         backpropagate sum_s ||W_s - V_s||² / (2 μ), once
-        Adam step; cosine step; advance sampler/counters
+        Adam step; StepLR step; advance sampler/counters
         periodically evaluate validation CE + freshly projected penalty
         retain the actual best post-update weights and score on the host
         periodically atomically save all restart state
-    restore best weights; next stage starts fresh optimizer
+    restore best weights; retain Adam moments and scheduler for next stage
 project final selected matrices and export their factors
 measure validation pre-export/export gap and save/reload agreement
 ```
@@ -76,17 +76,17 @@ generation/cache compatibility, accounting and deterministic CPU restart.
 |---|---|---|
 | Pretrained Qwen3 and CE replace random GNN/sum-rate or Flow/CFM | Preserve the accessible LM objective and avoid scratch pretraining | Original and matched dense controls; general NLL plus original CLM tasks |
 | Per-matrix ranks set by storage budget | Heterogeneous LM matrices; rank fraction alone does not imply smaller storage | Whole-model accounting, noncompressive rank rejection, budget sweep |
-| Flow optimizer resets; GNN-style held-out augmented selection | Explicit coherent transfer of conflicting source conventions | Documented, fixed for every trained control; optimizer-policy alternatives are not silently pooled |
+| GNN persistent Adam/StepLR and held-out augmented selection | Match the original constrained implementation; source steps its scheduler per epoch, here per optimizer update with a stage-boundary decay | Restart tests verify moment step counters across stages; `flow_reset` is a separate Adam/cosine ablation, fixed across its controls |
 | Fixed steps, gradient accumulation/checkpointing, FP32 masters and BF16 autocast | Feasible one-GPU memory and matched token budgets | Equal-token tests; compare future FP32/BF16 checks if numerical problems arise |
 | Reduced full SVD replaces legacy full-size SVD storage | Same hard projection with smaller temporary factors | FP64 matrix equivalence tests; no randomized/approximate projection |
 | Safetensors factors, custom loader, reference API | Make low rank physically deployable with native tokenizer/tools | No dense selected state keys; reload/logit tests; real tool-call formatting check |
-| New absolute μ values | GNN/Flow losses and matrix counts have different scales | Initial actual residual audit; constant-μ controls with identical stage/reset counts |
+| New absolute μ values | GNN/Flow losses and matrix counts have different scales | Initial actual residual audit; constant-μ controls with identical optimizer policy/stage counts |
 
 An optimizer update with accumulation is treated as one effective minibatch, with proxies
 held fixed until its update. The source refresh per minibatch is therefore preserved at
 optimizer-update granularity; increasing `projection_every` is explicitly rejected.
-The optional `ablation_constant_mu` freezes μ while retaining the same number of optimizer
-resets/steps. It is labeled an ablation, not the default continuation algorithm.
+The optional `ablation_constant_mu` freezes μ while retaining the same optimizer policy and number of
+steps. It is labeled an ablation, not the default continuation algorithm.
 
 ## Layer and rank policy
 
@@ -138,16 +138,15 @@ best-model CPU copies (~2.38 GB), checkpoint staging and asset loading. Actual p
 memory is unmeasured. These estimates do not justify a claim that 24 GiB is sufficient.
 
 Mid-stage atomic checkpoint writes can approach 10.6 GB (dense model, Adam, best model,
-proxies); the old and temporary new checkpoint coexist during replacement. At completed
-stages, optimizer/best states are dropped. A completed constrained checkpoint is about
+proxies); the old and temporary new checkpoint coexist during replacement. At intermediate stage boundaries, GNN mode retains optimizer state and drops only the best-model copy; Flow mode drops both. At final completion both are dropped. A completed constrained checkpoint is about
 3.44 GB before serialization overhead. Reserve at least 250 GB for the pilot and 500 GB
 for the main grid plus logs/containers/caches, then check quotas; these are planning
 allowances, not measured final usage. Concurrent checkpoint writers require additional
 space and can saturate shared storage.
 
 Exact reduced SVD costs O(mn min(m,n)) each time, independently of the number of retained
-singular vectors. The full initial 84-matrix CPU audit took 55.33 seconds and peak process
-RSS was 4.82 GB in this environment; it did not retain all proxies or backpropagate.
+singular vectors. The full initial 84-matrix CPU audit took 71.53 seconds and peak process
+RSS was 4.84 GB in this environment; it did not retain all proxies or backpropagate.
 It is not a GPU runtime estimate. Training logs split projection/update/total costs;
 total time also includes validation, checkpointing and initialization. ASVD sensitivity
 search requires up to 84×6×16 calibration forward passes plus decompositions, a sizable
@@ -182,3 +181,24 @@ For a single linear map and the same input, the elementary bound
 loss or trajectory guarantee without further assumptions about all intervening maps,
 inputs and decoding. No GNN/Flow minimizer-limit claim is transferred to finite-step
 nonconvex LM training, and no weight bound is asserted to preserve context management.
+
+### Optimizer policy and provenance
+
+The earlier branch used Flow-style optimizer resets as its default. This revision makes
+`training.optimizer_policy="gnn_persistent"` explicit in both released configurations:
+Adam moments persist after restoring best stage weights, and StepLR multiplies the
+learning rate by sqrt(gamma) at each stage boundary. This matches the supplied GNN code,
+including its decision not to roll back moments with the best weights. In the GNN code a
+scheduler step represents an epoch; here it represents an optimizer update. The stage
+boundary, not the absolute number of GNN epochs, defines the decay timing. The source
+learning rate and mu values are not presumed transferable.
+
+`flow_reset` remains an optional, labeled transfer ablation with new Adam and cosine
+annealing per stage. Do not pool its outputs with the GNN policy. Checkpoint resume
+rejects a changed configuration/policy. Both policies have exact CPU restart tests.
+
+The small update budgets are feasibility screens, not established sufficient recovery.
+In particular, strong final coupling with only 20 updates per stage may leave a large
+deployment gap. Inspect residual decrease and validation loss before selecting a longer
+budget; retain failed pilot outputs and count any extra tuning/recovery tokens. A failed
+short pilot does not establish an inherent limitation of the constrained formulation.
