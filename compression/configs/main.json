@@ -1,0 +1,91 @@
+{
+  "model": {
+    "id": "Qwen/Qwen3-0.6B",
+    "revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+    "provenance": "post-trained general Qwen3; not a CLM-RL checkpoint"
+  },
+  "data": {
+    "id": "Salesforce/wikitext",
+    "name": "wikitext-2-raw-v1",
+    "revision": "b08601e04326c79dfdd32d625aee71d232d685c3",
+    "sequence_length": 512,
+    "max_tokens": {
+      "train": 1048576,
+      "validation": 32768,
+      "test": 65536
+    }
+  },
+  "seed": 0,
+  "method": "constrained",
+  "selection": {
+    "kind": "mlp",
+    "keep": 0.8
+  },
+  "penalty": {
+    "initial": 10000.0,
+    "minimum": 100.0,
+    "gamma": 0.1
+  },
+  "training": {
+    "stage_steps": 40,
+    "batch_size": 1,
+    "accumulation": 8,
+    "eval_every": 10,
+    "checkpoint_every": 10,
+    "validation_batches": 8,
+    "lr": 1e-05,
+    "precision": "bfloat16",
+    "gradient_checkpointing": true,
+    "projection_every": 1
+  },
+  "calibration_batches": 16,
+  "export_dtype": "bfloat16",
+  "contextbench": {
+    "revision": "fb533c18c78a82d3f1b2047a9c1700735cf829ae",
+    "budget": 32768,
+    "reserve": 2048,
+    "max_tokens": 1024,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "enable_thinking": false,
+    "max_steps": 256,
+    "episode_timeout": 1800,
+    "modes": [
+      "clm",
+      "append_only"
+    ],
+    "seeds": [
+      2101,
+      2102,
+      2103
+    ],
+    "tasks": [
+      {
+        "family": "kv_store",
+        "level": "R130"
+      },
+      {
+        "family": "kv_store",
+        "level": "R1000"
+      },
+      {
+        "family": "needle_retention",
+        "level": "K4-C8"
+      },
+      {
+        "family": "log_triage",
+        "level": "L1600"
+      },
+      {
+        "family": "sudoku_sketchpad",
+        "level": "t30"
+      }
+    ]
+  },
+  "provisional_thresholds": {
+    "max_perplexity_ratio": 1.1,
+    "max_clm_absolute_drop": 0.05,
+    "min_dense_clm_reward": 0.5,
+    "min_whole_model_reduction": 0.05
+  }
+}

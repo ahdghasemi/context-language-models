@@ -1,0 +1,23 @@
+# Reference task container. Derived from ContextBench environment/contextbench.def
+# at fb533c18c78a82d3f1b2047a9c1700735cf829ae (Apache-2.0).
+Bootstrap: docker
+From: python@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e
+
+%post
+    set -e
+    mkdir -p /app /logs
+    chmod 777 /logs
+    ln -sf /usr/local/bin/python3 /usr/bin/python3
+    ln -sf /usr/local/bin/python /usr/bin/python
+    python3 -m venv /opt/harbor-server
+    /opt/harbor-server/bin/pip install --no-cache-dir uvicorn==0.38.0 fastapi==0.128.0
+    apt-get update -qq
+    apt-get install -y -qq tmux
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    pip3 install --no-cache-dir asciinema==2.4.0
+    chmod -R a+rX /opt/harbor-server
+
+%test
+    /opt/harbor-server/bin/python3 -c 'import uvicorn, fastapi'
+    /usr/bin/python3 --version

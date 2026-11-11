@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+def main():
+    manifest, stage = Path(sys.argv[1]), sys.argv[2]
+    spec = json.loads(manifest.read_text())
+    campaign, snapshot = Path(spec["campaign"]), Path(spec["snapshot"])
+    freeze = subprocess.check_output([sys.executable, "-m", "pip", "freeze"])
+    if hashlib.sha256(freeze).hexdigest() != spec["environment"]["freeze_sha256"]:
+        raise RuntimeError("Python environment changed after setup; use a new environment and campaign")
+    py = [sys.executable, "-m", "tiny_clm.cli"]
+    if stage == "environment":
+        command = py+["environment", "--require-cuda", "--min-vram-gib", "24", "--output", str(campaign/"environment.json")]
+    elif stage == "correctness":
+        command = [sys.executable, "-m", "pytest", "-q", "compression/tests", "clm/tests/test_context_string.py",
+                   "--junitxml="+str(campaign/"correctness.xml"), "-o", "cache_dir="+str(campaign/"pytest-cache")]
+    elif stage == "smoke":
+        command = [sys.executable, "-m", "tiny_clm.smoke", "--output", str(campaign/"smoke")]
+    elif stage == "prepare":
+        subprocess.run(py+["prepare", "--config", str(campaign/"config.json"), "--destination", str(Path(spec["assets"]).parent)], check=True)
+        command = [sys.executable, "-m", "tiny_clm.contextbench", "prepare", "--config", str(campaign/"config.json"),
+                   "--source", spec["contextbench_source"], "--destination", spec["contextbench_dir"],
+                   "--recipe", str(snapshot/"compression/contextbench.def")]
+    elif stage == "aggregate":
+        command = [sys.executable, str(snapshot/"compression/aggregate.py"), "--manifest", str(manifest)]
+    else:
+        index = int(os.environ["SLURM_ARRAY_TASK_ID"])
+        row = spec["rows"][index]
+        run = campaign/"runs"/row["run_id"]
+        config = campaign/"configs"/(row["run_id"]+".json")
+        if stage == "train":
+            command = py+["train", "--config", str(config), "--assets", spec["assets"], "--run", str(run)]
+            if os.environ.get("TINY_CLM_RESUME") == "1":
+                command += ["--resume"]
+        elif stage == "export":
+            command = py+["export", "--run", str(run)]
+        elif stage == "evaluate":
+            command = py+["evaluate", "--artifact", str(run/"export"), "--output", str(run/"evaluation.json")]
+        elif stage == "profile":
+            command = py+["profile", "--artifact", str(run/"export"), "--output", str(run/"profile.json")]
+        elif stage == "contextbench":
+            command = [sys.executable, "-m", "tiny_clm.contextbench", "run", "--artifact", str(run/"export"),
+                       "--config", str(config), "--lock", str(Path(spec["contextbench_dir"])/"contextbench-lock.json"),
+                       "--output", str(run/"contextbench")]
+        else:
+            raise ValueError("unknown stage")
+    print("Executing:", command, flush=True)
+    # Replace the process so Slurm's advance signal reaches the trainer directly.
+    os.execv(command[0], command)
+
+
+if __name__ == "__main__":
+    main()

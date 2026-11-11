@@ -1,0 +1,15 @@
+# Core dependencies only. The upstream harness is installed separately by setup.
+transformers==4.57.1
+datasets==4.4.1
+huggingface-hub==0.36.2
+safetensors==0.8.0
+numpy==2.3.4
+fastapi==0.128.0
+uvicorn==0.38.0
+httpx==0.28.1
+pytest==8.4.2
+matplotlib==3.10.7
+litellm==1.109.0
+pyyaml==6.0.3
+tiktoken==0.14.0
+# Install torch==2.8.0 using the explicitly selected CPU/CUDA wheel index.

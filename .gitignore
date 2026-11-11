@@ -7,3 +7,20 @@ clm_icl_runs/
 results/
 .env
 tools/
+# Compression assets and run-local state (never commit credentials or model weights).
+*.pt
+*.safetensors
+*.npy
+*.npz
+*.sif
+*.log
+slurm-*.out
+compression/local.env
+compression/local*.json
+assets-lock.json
+data/
+checkpoints/
+snapshots/
+campaigns/
+cache/
+.pytest_cache/

@@ -42,13 +42,22 @@ def export_run(run, device="cpu"):
         model.gradient_checkpointing_disable()
     val = load_blocks(cfg["assets"]["files"]["validation"]["path"], model.config.vocab_size)
     dtype = cfg["export_dtype"]
+    # Project the actual trained FP32 weights, as in the post-hoc controls.
+    # Preserve only selected matrices while measuring the dense model at export precision.
+    originals = ({name: model.get_submodule(name).weight.detach().cpu().clone() for name in ranks}
+                 if ranks and not already_factorized else {})
     # Hold precision fixed on both sides of export; report rounding separately from training precision.
     model.to(dtype=DTYPES[dtype])
     before = nll(model, val, cfg["training"]["validation_batches"])
     x = torch.tensor(val[:1].copy(), device=device, dtype=torch.long)
     old_logits = model(x, use_cache=False).logits.float().cpu()
     if ranks and not already_factorized:
+        for name, weight in originals.items():
+            layer = model.get_submodule(name)
+            layer.weight = torch.nn.Parameter(weight.to(layer.weight.device), requires_grad=False)
         replace(model, ranks)
+        model.to(dtype=DTYPES[dtype])
+    del originals
     after = nll(model, val, cfg["training"]["validation_batches"])
     new_logits = model(x, use_cache=False).logits.float().cpu()
     gap = {"before": before, "after": after, "nll_delta": after["nll"]-before["nll"],

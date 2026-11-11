@@ -90,7 +90,7 @@ def prepare(config, source, destination, recipe, *, skip_container=False):
             # Exercise the actual Harbor isolation flags before any GPU array.
             subprocess.run(["singularity", "exec", "--writable-tmpfs", "--fakeroot",
                 "--containall", "--pid", "--no-mount", "home,tmp,bind-paths", str(image),
-                "python3", "-c", "import fastapi,uvicorn; print('container runtime check passed')"], check=True)
+                "/opt/harbor-server/bin/python3", "-c", "import fastapi,uvicorn; print('container runtime check passed')"], check=True)
         # Pinned source via PYTHONPATH, never editable pip installs into a live job environment.
         env = dict(os.environ, PYTHONPATH=str(source)+os.pathsep+os.environ.get("PYTHONPATH", ""))
         tasks = destination/"tasks"

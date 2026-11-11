@@ -1,5 +1,10 @@
 # Context Language Models (CLMs)
 
+**Fork research extension:** [Constrained backbone compression](compression/README.md)
+adds a separate Qwen3 compression pipeline and [Unity/Slurm workflow](compression/README_UNITY.md).
+It is a scoped open-weight experiment, not a reproduction of the paper's trained CLM checkpoint.
+The original harness and baseline commands below are preserved.
+
 <p align="center">
   <a href="https://rulinshao.github.io/">Rulin Shao</a><sup>1,2</sup>,
   <a href="https://www.szj.io/">Shannon Zejiang Shen</a><sup>3</sup>,
