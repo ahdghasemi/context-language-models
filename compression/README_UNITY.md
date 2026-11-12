@@ -1,9 +1,11 @@
 # Unity / Slurm operating instructions
 
-This workflow is implemented. The first user-submitted baseline campaign failed at
-CPU job-step launch; the second reached Python on CPU/GPU nodes but failed the dependency
-fingerprint check. Their downstream model jobs were cancelled. Baseline quality and
-compression results on Unity remain unmeasured. `gpu`, `gpu-preempt`, `cpu` partition terminology and
+The user-submitted `baseline-003` completed all nine Slurm stages, including real-model
+evaluation and GPU profiling. **Its capability gate failed: all four CLM and four
+append-only episodes scored zero. Do not advance to compression on this baseline.**
+Constrained real-model compression remains untested. Earlier campaigns failed at job
+launch and dependency fingerprinting; those issues cleared in baseline-003.
+`gpu`, `gpu-preempt`, `cpu` partition terminology and
 `module load apptainer/latest` were checked against official Unity documentation on
 2026-11-11. User output subsequently verified account `pi_aghasemi_umass_edu`, allowed
 QoS `long,normal,short`, `a100-80g`, driver compatibility on an A100, and the task
@@ -18,8 +20,9 @@ That exposed an independent host fakeroot GLIBC incompatibility. The task base i
 digest-pinned to Python 3.13.15 on Debian trixie; see the diagnosis below.
 The rebuilt container and all four task packages passed on Unity. Model/data hashes
 also passed verification. The first baseline environment job passed, but CPU steps
-failed with an invalid GRES request; see the launch fix below. CLM episodes and complete
-campaigns are still unverified. See [Unity validation](docs/UNITY_VALIDATION.md).
+failed with an invalid GRES request; see the launch fix below. The later baseline-003
+finished but failed the quality criterion, as detailed in
+[Unity validation](docs/UNITY_VALIDATION.md#baseline-003-completed-workflow-zero-task-reward).
 
 Official references:
 [sbatch](https://docs.unity.rc.umass.edu/documentation/jobs/sbatch/),
@@ -496,8 +499,31 @@ PYTHONPATH="$TINY_CLM_ROOT/clm" python -m tiny_clm.environment --venv "$TINY_CLM
 For diagnosis against a previous campaign, call `verify_environment(spec["venv"],
 spec["environment"])` using its manifest. Do not rerun setup, install/upgrade packages,
 delete egg-info or edit READY.json/freeze.txt merely to suppress a mismatch. Preserve
-both failed campaigns. Only after the original fingerprint verifies should the updated
-source be submitted as a new `baseline-003`; the assets and task container can be reused.
+both failed campaigns. The user subsequently verified the original hash and completed
+`baseline-003` using the existing assets and container. Its quality gate failed; the next
+step is inspecting its saved replies, not submitting a compression pilot.
 
 Primary references: https://docs.python.org/3.12/using/cmdline.html#cmdoption-I and
 https://pip.pypa.io/en/stable/cli/pip_freeze/.
+
+## Inspect a completed but unsuccessful baseline
+
+The inspection script uses only the Python standard library, reads saved outputs, and
+does not import model libraries, submit jobs, change thresholds, or modify the campaign.
+Use the current checkout for diagnostics while preserving the original run snapshot:
+
+```bash
+python3 compression/inspect_contextbench.py \
+  --campaign "$TINY_CLM_RUNS/baseline-003" \
+  --episode clm--kv-store-R1000-seed1101 \
+  --episode clm--kv-store-R130-seed1101 \
+  --episode append_only--kv-store-R130-seed1102
+```
+
+It prints episode rewards, the recorded termination reason, command/context-edit
+counters, server finish reasons, and bounded early/late assistant replies plus the
+following tool result or reminder. Both upstream layouts are supported: CLM has a
+final `trajectory.json`; append-only uses `context_snapshots/turn-*.json`. Early
+snapshots are used because context editing can remove earlier messages from the final
+transcript. Excerpts are explicitly truncated and are not raw generated token IDs.
+Missing diagnostic files are identified; an entirely absent transcript fails clearly.

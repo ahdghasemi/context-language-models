@@ -211,3 +211,76 @@ installed upgrade, then the targeted suite passed. These tests bootstrap an isol
 temporary venv using the installed pip code, without network access or ensurepip.
 Python compilation, shell syntax and diff checks passed. No Unity validation of this
 fingerprint repair or new baseline submission was executed by the assistant.
+
+## baseline-003: completed workflow, zero task reward
+
+The following measurements were supplied in the user's terminal output, not produced
+by assistant access to Unity. Commit: `e3181bd8586278ef83b88b0123efb3648da8c79b`.
+The original installed-package fingerprint verified unchanged:
+`f050b1957056a34c40df4f892cbe2c34bae39af1652b084515e329fd7167dccb`.
+All nine jobs (1472969–1472977) completed with exit 0:0. Environment, correctness and
+smoke took 11 seconds, 1:35 and 25 seconds. ContextBench took 55:06. Slurm completion
+means outputs were produced, not that the capability gate passed.
+
+The gate was false. Its manifest hash was
+`30d6f095933170bebfcc72e1657b88bb21f743b8829e086f66d717018ac91e91`.
+The run `original-keep0.8-seed0` was the uncompressed original checkpoint, with zero
+training tokens and zero projection time. The inherited keep0.8 run label does not
+mean any compression took place: whole_keep=1.0.
+
+| Measured property | User-reported result |
+| --- | --- |
+| Parameters, original and exported | 596,049,920 |
+| Serialized weight bytes | 1,192,135,112 |
+| Validation NLL / perplexity | 3.2950888499617577 / 26.97981111859551 |
+| Export NLL delta / reload maximum logit error | 0.0 / 0.0 |
+| CLM / append-only mean reward | 0.0 / 0.0 |
+| Artifact SHA-256 | ca051e9da0b09e6c14792278cefdaddd3e52f24507c0b7fb4e12b9575e14b2d3 |
+
+Reported hardware: NVIDIA A100-SXM4-80GB. The reference-backend profile produced:
+
+| Prompt tokens | Median prefill seconds | Decode tokens/s | Peak CUDA allocated bytes |
+| --- | --- | --- | --- |
+| 128 | 0.02805823998642154 | 37.21851447113786 | 1,255,424,000 |
+| 512 | 0.02834520599571988 | 37.55204807776526 | 1,415,990,272 |
+| 2048 | 0.03374105098191649 | 37.5838932537975 | 2,062,580,736 |
+
+These are uncompressed fixed-workload measurements, not speedups or task latency.
+Peak allocation includes weights, activations, workspaces and cache; it is not an
+isolated weight-memory figure. The full profile sample arrays have not been supplied.
+
+Every episode had status=complete, grader_valid=1, error=null and reward=0:
+
+| Mode | Level / seed | Model calls | Parsed tool calls | Ops delivered / total | Answers / 24 |
+| --- | --- | --- | --- | --- | --- |
+| CLM | R1000 / 1101 | 128 | 0 | 1 / 34 | 0 |
+| CLM | R1000 / 1102 | 115 | 0 | 1 / 34 | 0 |
+| CLM | R130 / 1101 | 116 | 0 | 1 / 26 | 0 |
+| CLM | R130 / 1102 | 128 | 0 | 1 / 26 | 0 |
+| Append-only | R1000 / 1101 | 124 | 22 | 4 / 34 | 0 |
+| Append-only | R1000 / 1102 | 128 | 17 | 1 / 34 | 0 |
+| Append-only | R130 / 1101 | 128 | 17 | 1 / 26 | 0 |
+| Append-only | R130 / 1102 | 85 | 84 | 26 / 26 | 24 |
+
+All matched-answer counts were zero, including the append-only episode that reached
+all operations and attempted 24 answers. The CLM failures occur before meaningful
+stream progress. In the inspected original harness, `_extract_tool_call` requires a
+structured bash call; a response without one adds a reminder and continues.
+`ClmStream._is_successful_submit` advances the stream only after the tool result.
+The upstream append-only agent at the pinned ContextBench revision also uses structured
+bash calls, with a shorter system prompt and its own reminder. The server counted
+parsed calls, not necessarily valid/executed commands. Thus a zero CLM count is a
+protocol/capability diagnostic, but does not alone distinguish model instruction
+failure from malformed output or client/server handling. Saved replies are needed.
+
+The benchmark budget uses o200k_base text counts; server context lengths use the
+Qwen tokenizer and chat template. Values above 32,768 in the latter are not, by
+themselves, a violation of the benchmark's stated counter. Do not silently change
+tokenizer calibration, increase caps, weaken the gate, or substitute a larger model
+and pool it with this run. Any changed protocol requires a separate recorded baseline.
+No real-model constrained method has run; this result does not assess its efficacy.
+
+Added a standard-library, read-only inspector for the two upstream transcript layouts.
+Four local tests passed for early/late excerpts, campaign byte preservation, missing
+transcripts and explicit truncation. No Unity execution of this inspector has yet been
+observed. The actual model replies and detailed profiler samples remain uninspected.
