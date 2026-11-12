@@ -284,3 +284,47 @@ Added a standard-library, read-only inspector for the two upstream transcript la
 Four local tests passed for early/late excerpts, campaign byte preservation, missing
 transcripts and explicit truncation. No Unity execution of this inspector has yet been
 observed. The actual model replies and detailed profiler samples remain uninspected.
+
+### Saved replies supplied after the first baseline report
+
+The user ran the inspector at `22f06e96a3b54faf23ba0e69884bd1a798db43a9` and supplied
+its output. The sampled replies establish the following, without inferring unseen
+turns or changing the original scores:
+
+* CLM R1000/1101: 128 server finish reasons were `stop`; n_bash=0 and
+  n_ctx_syncs_real=0. The stream recorded `max_steps`. Early replies wrote a Python
+  here-document after the ordinary text `bash`, with no structured tool call. The
+  harness repeatedly replied that no tool call was present. The last replies reduced
+  to an unfinished here-document header. No requested offloading code was executed.
+* CLM R130/1101: 116 finish reasons were `stop`; n_bash=0 and n_ctx_syncs_real=0.
+  The stream recorded `budget_wall`. The model claimed the first batch was already
+  offloaded and generated references to subsequent batch labels despite only one
+  operation being delivered. These are unsupported generated statements, not observed
+  context-management actions. The repeated no-tool-call turns consumed the budget.
+* Append-only R130/1102: 84 structured calls reached execution. An early call tried
+  to execute `SET K00000 = ...` as a shell command and returned exit 127. A late answer
+  marker was emitted without shell quoting and produced a syntax error, exit 2. The
+  following readiness command succeeded. The stream recorded `stream_exhausted`.
+  Thus all 26 operations being delivered and 24 answers counted by the grader do not
+  mean correct answers or successful shell execution. All matched answers were zero.
+
+The observed failure includes output-format and task-execution problems before useful
+CLM memory management. It cannot support a claim about compression or long-horizon
+retention. Do not convert arbitrary generated shell text into executed calls: that
+would change the original harness's protocol rather than validate this baseline.
+Neither a longer step cap nor a weaker threshold addresses the observed behavior.
+
+The common server parsed some append-only tool calls, but CLM and append-only use
+different clients (LiteLLM versus OpenAI). The saved text alone cannot establish
+whether CLM's request contained the tool schema. Added a no-model loopback probe of
+the original CLM query method with its actual installed client, checking both the
+request and the structured response. Model generation and task behavior are outside
+this probe's scope. No model, decoding setting, prompt, parser or gate was changed.
+
+Local fixture/inspector tests: **6 passed, 1 skipped**. The skipped test is the real
+CLM SDK round trip: this local runtime lacks LiteLLM and Harbor. A local attempt to
+install the pinned LiteLLM dependencies did not complete and was interrupted; no
+user environment was modified. The fixture tests exercise an actual localhost HTTP
+exchange, reject dropped tools and text-only replies, and preserve saved transcripts.
+Python compilation and diff checks passed. The full SDK probe still requires execution
+in the user's already installed Unity environment; no new GPU run was performed.

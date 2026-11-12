@@ -527,3 +527,19 @@ final `trajectory.json`; append-only uses `context_snapshots/turn-*.json`. Early
 snapshots are used because context editing can remove earlier messages from the final
 transcript. Excerpts are explicitly truncated and are not raw generated token IDs.
 Missing diagnostic files are identified; an entirely absent transcript fails clearly.
+
+If replies appear as shell code in ordinary assistant text instead of structured tool
+calls, verify the client boundary before changing the model or parser:
+
+```bash
+PYTHONPATH="$TINY_CLM_ROOT/clm" "$TINY_CLM_VENV/bin/python" \
+  compression/check_client_protocol.py
+```
+
+This invokes the original `ClmAgent._query_with_retry` through the installed LiteLLM
+client against a temporary localhost HTTP fixture. It checks that the bash schema,
+messages, thinking flag and decoding parameters arrive intact, then that a synthetic
+structured bash reply survives the SDK and original action extractor. It executes no
+shell action, loads no weights, uses no real API credentials, and submits no jobs.
+Passing verifies this transport path, not the model's ability to generate tool calls.
+The same check is included in the correctness suite when harness dependencies exist.
