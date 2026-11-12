@@ -40,7 +40,7 @@ bind path = /etc/localtime
 bind path = /etc/hosts
 ```
 
-The current fix removes the directory workaround and instead clears inherited bind
+Commit `4fb9e08e220e6625db5e516d5cd5c1f119f1d363` removes the directory workaround and instead clears inherited bind
 and mount variables in the environment passed to container subprocesses, including
 Harbor. Explicit command-line mounts and the task grader remain unchanged. Relevant
 primary sources inspected were the Apptainer 1.5 user guide and its exact 1.5.5 source:
@@ -54,10 +54,66 @@ bind/mount variables while keeping cache/temp/Slurm/CUDA settings and leaving th
 unchanged; an explicit input environment is copied without adding ambient defaults.
 Python compilation, recipe shell parsing and diff whitespace checks also passed.
 The full ML suite was not rerun in the replacement local runtime, which lacks PyTorch.
-No Apptainer runtime is available there, so full build/runtime validation still requires
-the user's Unity retry. Do not report this as a completed container build until its
-output and runtime check succeed. New total test count is 45; only the new two tests
-were executed locally for this fix, and the previous 43 passed on Unity as noted above.
+No Apptainer runtime is available there. New total test count is 45; only the new two
+tests were executed locally for that fix, and the previous 43 passed on Unity as noted
+above.
+
+## Follow-up: mount fix passed; host fakeroot library failed
+
+The user checked out `4fb9e08e220e6625db5e516d5cd5c1f119f1d363`, explicitly loaded its
+Python source, and ran `pytest -q compression/tests/test_container_env.py`: **2 passed
+in 0.12 seconds**. The subsequent build reached `%post` without the missing-bind errors,
+then failed before any recipe command could run:
+
+```text
+/bin/sh: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
+(required by /.singularity.d/libs/libfakeroot.so)
+```
+
+This is an independent compatibility problem. The log reports no subuid mapping and
+use of the host fakeroot command. Apptainer explicitly documents the GLIBC mismatch
+when the host fakeroot library needs symbols absent from the container. Its source also
+uses the host fakeroot command for action execution in this mode, so a build-only
+`--ignore-fakeroot-command` flag is insufficient for our runtime path. Official sources:
+
+* https://apptainer.org/docs/user/1.5/fakeroot.html
+* https://github.com/apptainer/apptainer/blob/v1.5.5/internal/pkg/runtime/launch/launcher_linux.go
+
+### Revised base and independently checked provenance
+
+Registry metadata and the replacement amd64 base layer were retrieved on 2026-11-12.
+The compressed layer SHA-256 was checked before reading `/var/lib/dpkg/status`.
+No container process was executed for this inspection.
+
+| Property | Original | Replacement |
+| --- | --- | --- |
+| Official Python image | Upstream digest below | `python:3.13.15-slim-trixie` resolved to digest below |
+| Python (OCI config) | 3.13.15 | 3.13.15 |
+| Debian suite (OCI history) | bookworm | trixie |
+| libc6 package inspected in replacement base | Not re-inspected | 2.41-12+deb13u4, amd64 |
+
+Original index: `sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e`.
+Original amd64 manifest: `sha256:2f2e5a876c71a6757f55ec57f2add0225ddaf01c802a33fcc29073943f94d907`.
+Replacement index (used in the recipe):
+`sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b`.
+Replacement amd64 manifest:
+`sha256:37134a49d21d2120e4c4d73bb76f8a4ab9aef31f096f7ec2ead48c2feead4332`.
+Inspected base layer:
+`sha256:6b37362b3da78869050b894b799ad4df04f1f3b52774087db0d81151570244c8`.
+
+The Python source SHA in both image configurations is
+`1e66a7945a48390ee4c2a4268a0e4185884059a13c4aab6d148aa208deea4a76`.
+The image change is necessary for the observed host-library requirement and retains
+the task Python version, but is not an exact reproduction of the upstream OS image.
+Every method and both harness modes must use the same locked image. Task/grade code
+is unchanged; baseline episodes are still required to validate task behavior.
+
+The updated `%test` stops at any failure and prints libc; the Harbor-flag runtime
+preflight also prints Python/libc versions. Local checks for this revision: both
+environment regression tests passed again; Python compilation, recipe shell parsing
+and diff whitespace checks passed. No full ML suite, Apptainer build, Harbor runtime
+or Unity submission was executed by the assistant for this revision. A user retry must
+finish both build and runtime preflight before reporting container preparation success.
 
 Real-model/data preparation completion has not yet been shown in the user's output.
 Constrained training on the real checkpoint, baseline CLM competence, production GPU

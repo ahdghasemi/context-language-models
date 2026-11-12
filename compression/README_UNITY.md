@@ -9,8 +9,11 @@ No account, QoS or GPU type is invented or silently selected.
 
 Update from user-supplied Unity terminal output: the environment check, all 43 tests,
 and the tiny CUDA smoke passed inside an existing A100-80GB allocation. The first
-container builds failed on inherited /nas and /work binds. Container subprocesses now
-clear inherited bind/mount variables. A successful rebuilt container, CLM episodes, and the dependency-driven
+container builds failed on inherited /nas and /work binds. Clearing the inherited
+bind/mount variables passed its two new tests on Unity and allowed `%post` to start.
+That exposed an independent host fakeroot GLIBC incompatibility. The task base is now
+digest-pinned to Python 3.13.15 on Debian trixie; see the diagnosis below.
+A successful rebuilt container, CLM episodes, and the dependency-driven
 Slurm campaigns are still unverified. See [Unity validation](docs/UNITY_VALIDATION.md).
 
 Official references:
@@ -378,7 +381,37 @@ New submitted jobs already put their immutable source snapshot first on PYTHONPA
 Before updating the checkout, confirm that tracked changes are absent and no active
 process is using it directly. Existing campaigns retain their original snapshots.
 
-The xattr `ENOTSUP` warnings and root-mapped fakeroot fallback were not the fatal error
-in the supplied log. Do not add `--ignore-fakeroot-command` or disable containment on
-that basis. If a different bind destination or a subsequent fakeroot error appears,
-capture that exact failure rather than treating this patch as a verified complete build.
+The xattr `ENOTSUP` warnings were not the fatal error in the supplied logs.
+
+## Container build failure: host fakeroot requires GLIBC_2.38
+
+After the mount fix, the next Unity attempt reached `%post` but failed while loading
+`/.singularity.d/libs/libfakeroot.so`: `GLIBC_2.38 not found`. With no `/etc/subuid`
+entry, Apptainer uses a root-mapped namespace and the host fakeroot command/library.
+The old pinned base is Python 3.13.15 on Debian bookworm. The replacement is the same
+Python version on Debian trixie, pinned by OCI digest, whose inspected amd64 base layer
+contains libc6 2.41-12+deb13u4. See `docs/UNITY_VALIDATION.md` for exact provenance.
+
+This addresses the observed library requirement for both building and Harbor task
+execution, which also uses `--fakeroot`. The build recipe's `%test` now fails immediately
+on any failed check, and the existing runtime preflight reports Python and libc versions
+under Harbor's isolation flags. Do not bypass this preflight. No host libraries, system
+configuration, installed training dependencies, or containment flags need changing.
+
+We do not add `--ignore-fakeroot-command`: it removes part of the privilege emulation,
+which can break Debian package installation, and changing only the build command would
+leave runtime fakeroot unaddressed. Apptainer documents this incompatibility and the
+limitations of that flag at https://apptainer.org/docs/user/1.5/fakeroot.html.
+
+Preserve the failed destination as a unique `.failed-glibc-<timestamp>` sibling, then
+prepare again from the new committed recipe inside a live compute allocation. Do not
+move a destination with a completed lock or an active preparation process. The OCI cache
+can be reused. Check `squeue -j "$SLURM_JOB_ID" -o "%.18i %.10T %.12L"` first; use a new
+allocation if the current session is about to expire. A new base must be downloaded and
+built; completion time has not yet been measured on Unity.
+
+This is an explicit OS-level task-environment change from upstream ContextBench. Use
+the same resulting image and lock for all dense/compressed and CLM/append-only controls.
+Do not combine results produced using different image hashes. The task definitions,
+graders and Python version remain fixed, but equivalent task behavior still requires
+the baseline episode checks. A successful image build alone does not establish it.
