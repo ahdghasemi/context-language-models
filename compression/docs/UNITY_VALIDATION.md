@@ -168,3 +168,46 @@ Both batch scripts passed shell syntax checks; Python compilation and diff white
 checks passed. The full ML suite and repaired Unity submission remain unrun
 by the assistant. Constrained training on the real checkpoint, baseline CLM competence,
 GPU profiling, and a complete Slurm campaign remain unverified.
+
+## baseline-002: launch succeeded, environment fingerprint failed
+
+The user fetched `132d15d15432bf6e795e7dfca229c250addb3475` and ran the three targeted
+test files: **16 passed in 6.99 seconds**. Nine new jobs were submitted. Subsequent
+accounting and logs showed:
+
+| Stage | Job | Observed outcome |
+| --- | --- | --- |
+| Environment | 1469298 | Failed, exit 1:0, 4 seconds, uri-gpu001 |
+| Correctness / smoke / model stages | 1469299–1469305 | Cancelled before execution |
+| Aggregate | 1469306 | Failed, exit 1:0, 5 seconds, gypsum-gpu096 |
+
+Both active jobs successfully created their srun steps and reached `run_stage.py`.
+Their launch commands showed `--gpus=1` and `--gres=none`, respectively. Both stopped
+at `Python environment changed after setup; use a new environment and campaign`.
+This verifies the repaired launch path on the two reported nodes; it does not verify
+ML correctness or any real-model result.
+
+Inspection found that the fingerprint used ordinary `python -m pip freeze` while the
+job appended the submitting checkout's PYTHONPATH. A local real-pip reproduction with
+installed direct-URL dist-info and source egg-info produced `fixture-clm==0.1` for
+ordinary freeze versus `fixture-clm @ file:///fixture/original-install` for isolated
+freeze, with no installed package change. The Unity diff has not yet been supplied;
+we cannot claim this is its exact discrepancy without checking the original hash.
+
+The repair isolates package enumeration, removes mutable inherited Python source paths
+from batch jobs, and verifies dependencies before sbatch as well as at job execution.
+Existing locks are never refreshed; mismatch with the original freeze or campaign
+record remains fatal and includes a redacted diff. Setup uses isolated enumeration for
+new environments. The model and task container are unaffected.
+
+Local regression run: **19 passed, 2 deselected** (the two aggregation tests import
+unavailable PyTorch). Five new real-pip tests cover source-metadata shadowing, a real
+version change represented by replacement dist-info, modified freeze/READY records,
+and diagnostic URL redaction. Workflow tests verify a rejected environment submits no
+jobs and creates no campaign. The first synthetic upgrade fixture changed METADATA
+without renaming its versioned dist-info directory; pip continued reporting its old
+directory version, so that test failed. The fixture was corrected to represent an
+installed upgrade, then the targeted suite passed. These tests bootstrap an isolated
+temporary venv using the installed pip code, without network access or ensurepip.
+Python compilation, shell syntax and diff checks passed. No Unity validation of this
+fingerprint repair or new baseline submission was executed by the assistant.

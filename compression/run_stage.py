@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,9 +16,8 @@ def main():
     verify_snapshot(snapshot, spec["snapshot_hash"])
     if json.loads((campaign/"config.json").read_text()) != spec["config"]:
         raise ValueError("campaign configuration changed after submission")
-    freeze = subprocess.check_output([sys.executable, "-m", "pip", "freeze"])
-    if hashlib.sha256(freeze).hexdigest() != spec["environment"]["freeze_sha256"]:
-        raise RuntimeError("Python environment changed after setup; use a new environment and campaign")
+    from tiny_clm.environment import verify_environment
+    verify_environment(spec["venv"], spec["environment"])
     py = [sys.executable, "-m", "tiny_clm.cli"]
     if stage == "environment":
         command = py+["environment", "--require-cuda", "--min-vram-gib", "24", "--output", str(campaign/"environment.json")]

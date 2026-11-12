@@ -118,6 +118,13 @@ def test_real_git_snapshot_then_mock_scheduler_dependencies(tmp_path, monkeypatc
     venv = tmp_path/"env"
     venv.mkdir()
     (venv/"READY.json").write_text(json.dumps({"freeze_sha256": "fixture"}))
+    verified = []
+
+    def verify_fixture(path):
+        verified.append(path)
+        return json.loads((Path(path)/"READY.json").read_text())
+
+    monkeypatch.setattr(submit, "verify_environment", verify_fixture)
     monkeypatch.setenv("TINY_CLM_VENV", str(venv))
     monkeypatch.setenv("TINY_CLM_SNAPSHOTS", str(tmp_path/"snapshots"))
     monkeypatch.setenv("TINY_CLM_GPU_CONSTRAINT", "test-fixture-not-a-cluster-setting")
@@ -130,6 +137,7 @@ def test_real_git_snapshot_then_mock_scheduler_dependencies(tmp_path, monkeypatc
 
     def mocked_submit(command, **kw):
         if command[0] == "sbatch":
+            assert verified == [venv]
             assert "--export=ALL" in command
             assert not any(k in kw["env"] for k in
                            ("SLURM_JOB_ID", "SLURM_GPUS_PER_NODE", "SBATCH_GRES"))
@@ -147,6 +155,16 @@ def test_real_git_snapshot_then_mock_scheduler_dependencies(tmp_path, monkeypatc
     assert len(calls) == 2 and "--dependency=afterok:101" in calls[1]
     assert json.loads((campaign/"jobs.json").read_text()) == {"correctness": "101", "smoke": "102"}
 
+    def reject_environment(path):
+        raise RuntimeError("fixture installed environment mismatch")
+
+    monkeypatch.setattr(submit, "verify_environment", reject_environment)
+    blocked = tmp_path/"blocked-campaign"
+    with pytest.raises(RuntimeError, match="installed environment mismatch"):
+        submit.main(["correctness", "--config", str(config), "--campaign", str(blocked), "--submit"])
+    assert not blocked.exists()
+    assert len(calls) == 2  # No additional job was submitted on mismatch.
+
 
 def test_resume_filters_parent_resources_and_keeps_resume_export(tmp_path, monkeypatch):
     import subprocess
@@ -158,17 +176,22 @@ def test_resume_filters_parent_resources_and_keeps_resume_export(tmp_path, monke
     (run/"latest.pt").touch()
     manifest = tmp_path/"manifest.json"
     manifest.write_text(json.dumps({"campaign": str(tmp_path), "snapshot": "/snapshot",
-                                    "rows": [{"run_id": "fixture"}]}))
+                                    "rows": [{"run_id": "fixture"}],
+                                    "venv": "/fixture-env", "environment": {"fixture": True}}))
     (tmp_path/"jobs.json").write_text(json.dumps({"train": "100"}))
     monkeypatch.setenv("USER", "fixture")
     monkeypatch.setenv("SLURM_GPUS_PER_NODE", "a100:1")
     monkeypatch.setenv("TINY_CLM_GPUS", "1")
     calls = []
+    verified = []
+    monkeypatch.setattr(resume, "verify_environment", lambda path, expected:
+                        verified.append((path, expected)))
 
     def scheduler(command, **kwargs):
         if command[0] == "squeue":
             return ""
         assert command[0] == "sbatch"
+        assert verified == [("/fixture-env", {"fixture": True})]
         assert "SLURM_GPUS_PER_NODE" not in kwargs["env"]
         calls.append(command)
         return str(200+len(calls))+"\n"

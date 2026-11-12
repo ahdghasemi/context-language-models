@@ -22,7 +22,7 @@ if [[ "$STAGE" == prepare || "$STAGE" == contextbench ]]; then
 fi
 SNAPSHOT=$("$TINY_CLM_VENV/bin/python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["snapshot"])' "$MANIFEST")
 export TINY_CLM_COMMIT=$(cat "$SNAPSHOT/SNAPSHOT_COMMIT")
-export PYTHONPATH="$SNAPSHOT/clm${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$SNAPSHOT/clm"
 cd "$SNAPSHOT"
 mkdir -p "${TMPDIR:?}"
 export TMPDIR=$(mktemp -d "$TMPDIR/tclm-${SLURM_JOB_ID:-local}-XXXXXX")

@@ -9,6 +9,7 @@ import subprocess
 
 from submit import resource_args
 from tiny_clm.slurm import submission_environment
+from tiny_clm.environment import verify_environment
 
 
 def main():
@@ -38,6 +39,7 @@ def main():
     submitted = {}
     retry_log = None
     if a.submit:
+        verify_environment(spec["venv"], spec["environment"])
         # Include previous retry job IDs, not only the initial submission.
         known = set()
         for record in [campaign/"jobs.json", *campaign.glob("resume-jobs-*.json")]:

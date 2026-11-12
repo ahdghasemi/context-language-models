@@ -9,6 +9,7 @@ import subprocess
 from submit import read, resource_args, write
 from tiny_clm.io import digest
 from tiny_clm.slurm import submission_environment
+from tiny_clm.environment import verify_environment
 
 p = argparse.ArgumentParser()
 p.add_argument("--manifest", required=True)
@@ -27,6 +28,8 @@ root = Path(spec["campaign"])/("final-test-"+digest(chosen)[:16])
 jobs = {}
 if a.submit and (root/"jobs.json").exists():
     raise FileExistsError("final test was already submitted; inspect jobs/logs before resubmitting individual failed stages")
+if a.submit:
+    verify_environment(spec["venv"], spec["environment"])
 for stage, gpu, dependency in [("prepare", False, None), ("evaluate", True, "afterok"), ("aggregate", False, "afterany")]:
     command = ["sbatch", "--parsable", "--job-name=tclm-test-"+stage,
                *resource_args(gpu, "contextbench" if gpu else stage),

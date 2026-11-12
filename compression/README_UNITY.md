@@ -1,7 +1,8 @@
 # Unity / Slurm operating instructions
 
 This workflow is implemented. The first user-submitted baseline campaign failed at
-CPU job-step launch; its downstream model jobs were cancelled. Baseline quality and
+CPU job-step launch; the second reached Python on CPU/GPU nodes but failed the dependency
+fingerprint check. Their downstream model jobs were cancelled. Baseline quality and
 compression results on Unity remain unmeasured. `gpu`, `gpu-preempt`, `cpu` partition terminology and
 `module load apptainer/latest` were checked against official Unity documentation on
 2026-11-11. User output subsequently verified account `pi_aghasemi_umass_edu`, allowed
@@ -448,14 +449,55 @@ resume and final-test submission drivers use the same submission filter. Signal
 forwarding still goes through srun. Do not use the submission filter inside an already
 running allocation, where clearing its job identity would be incorrect.
 
-Keep `baseline-001`, its logs and its immutable snapshot as failure evidence. Fetch
-the new revision and submit a new `baseline-002`; no training checkpoint exists to
-resume in the failed campaign. Do not edit the old snapshot, requeue its failed jobs,
-rebuild the working container, or redownload verified assets for this launcher repair.
-Use the previous baseline resources (`long`, one A100-80GB, four CPUs, 32 GB, one-hour
-short GPU stages and six-hour ContextBench stage). The new campaign repeats correctness
-before releasing any model work. Its actual Slurm result still needs validation.
+Keep `baseline-001`, its logs and its immutable snapshot as failure evidence. The user
+submitted `baseline-002` with the launcher repair: its CPU/GPU steps reached Python,
+then failed the environment check described below. No training checkpoint exists to
+resume in either failed campaign. Do not edit old snapshots, requeue their failed jobs,
+rebuild the working container, or redownload verified assets for these launcher repairs.
+The baseline resources were `long`, one A100-80GB, four CPUs, 32 GB, one-hour short GPU
+stages and a six-hour ContextBench stage. Each new campaign repeats correctness before
+releasing model work.
 
 Primary references:
 https://slurm.schedmd.com/srun.html (GPU/GRES environment options and `--gres=none`),
 https://slurm.schedmd.com/sbatch.html (export and input/output environment).
+
+## Environment hash mismatch after the Slurm launch repair
+
+`baseline-002` reached Python on both CPU and GPU nodes, then failed the raw `pip
+freeze` hash check. This does not by itself establish that dependencies were changed.
+The former batch launcher appended the submitting terminal's PYTHONPATH, which can
+contain the mutable checkout's `clm/` directory. A non-editable setuptools build leaves
+ignored `*.egg-info` there. This metadata can shadow the installed distribution's
+`dist-info`, changing a direct-URL requirement to `clm==0.1.0` in pip's output. That
+mechanism was reproduced locally; the actual Unity package difference has not yet
+been captured, so it remains a diagnosis to verify rather than an observed fact.
+
+The installed-dependency check now runs the venv's Python with `-I -m pip freeze`.
+Isolated mode excludes PYTHONPATH, the current directory and user site packages from
+this check. Batch jobs also use only their immutable snapshot on PYTHONPATH; the
+ContextBench runner still adds its separately pinned source explicitly where needed.
+Setup records new environments with the same isolated command. Existing environments
+are **not** re-frozen: their saved freeze.txt hash must still match READY.json, and the
+observed isolated freeze must match that exact hash. Campaign execution additionally
+requires READY.json to equal the original manifest's copy.
+
+Submission, resume and final-test drivers check this before submitting any jobs.
+Each running stage checks again. A mismatch prints a unified diff with remote URLs
+redacted, then stops; no lock is rewritten and no package is excluded from the list.
+This remains an installed-requirements check, not a hash of every dependency's bytes.
+
+From the updated checkout, a read-only preflight is:
+
+```bash
+PYTHONPATH="$TINY_CLM_ROOT/clm" python -m tiny_clm.environment --venv "$TINY_CLM_VENV"
+```
+
+For diagnosis against a previous campaign, call `verify_environment(spec["venv"],
+spec["environment"])` using its manifest. Do not rerun setup, install/upgrade packages,
+delete egg-info or edit READY.json/freeze.txt merely to suppress a mismatch. Preserve
+both failed campaigns. Only after the original fingerprint verifies should the updated
+source be submitted as a new `baseline-003`; the assets and task container can be reused.
+
+Primary references: https://docs.python.org/3.12/using/cmdline.html#cmdoption-I and
+https://pip.pypa.io/en/stable/cli/pip_freeze/.

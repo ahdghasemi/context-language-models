@@ -9,7 +9,7 @@ STAGE=${3:?prepare/evaluate/aggregate}
 : "${TINY_CLM_VENV:?}"
 SNAPSHOT=$("$TINY_CLM_VENV/bin/python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["snapshot"])' "$MANIFEST")
 export TINY_CLM_COMMIT=$(cat "$SNAPSHOT/SNAPSHOT_COMMIT")
-export PYTHONPATH="$SNAPSHOT/clm${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$SNAPSHOT/clm"
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-2}
 export MKL_NUM_THREADS=$OMP_NUM_THREADS OPENBLAS_NUM_THREADS=$OMP_NUM_THREADS

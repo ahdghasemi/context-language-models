@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/"clm"))
 from tiny_clm.provenance import require_gate, snapshot_files, verify_snapshot  # noqa: E402
 from tiny_clm.slurm import submission_environment  # noqa: E402
+from tiny_clm.environment import verify_environment  # noqa: E402
 
 
 def read(path):
@@ -199,13 +200,15 @@ def main(argv=None):
     venv = Path(spec["venv"])
     if not (venv/"READY.json").exists():
         raise FileNotFoundError("environment not finalized; run setup_unity.sh")
+    verified_environment = verify_environment(venv)
+    print("Installed environment fingerprint verified before submission", flush=True)
     snap = snapshot(commit, os.environ.get("TINY_CLM_SNAPSHOTS", str(work/"snapshots")))
     campaign.mkdir(parents=True, exist_ok=False)
     (campaign/"logs").mkdir()
     (campaign/"configs").mkdir()
     spec["snapshot"] = str(snap)
     spec["snapshot_hash"] = verify_snapshot(snap)
-    spec["environment"] = read(venv/"READY.json")
+    spec["environment"] = verified_environment
     batch_env = submission_environment()
     spec["submission_environment_removed"] = sorted(set(os.environ)-set(batch_env))
     for row in rows:

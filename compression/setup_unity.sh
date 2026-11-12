@@ -16,7 +16,7 @@ fi
 # Non-editable package install. Jobs put their immutable snapshot first on PYTHONPATH.
 "$TINY_CLM_VENV/bin/python" -m pip install "$ROOT[compression]"
 "$TINY_CLM_VENV/bin/python" -m pip check
-"$TINY_CLM_VENV/bin/python" -m pip freeze > "$TINY_CLM_VENV/freeze.txt"
+"$TINY_CLM_VENV/bin/python" -I -m pip freeze > "$TINY_CLM_VENV/freeze.txt"
 "$TINY_CLM_VENV/bin/python" - <<'PY'
 import hashlib,json,os,pathlib,sys
 p=pathlib.Path(os.environ['TINY_CLM_VENV'])
