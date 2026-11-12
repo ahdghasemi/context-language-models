@@ -7,6 +7,12 @@ executed elsewhere. `gpu`, `gpu-preempt`, `cpu` partition terminology and
 driver compatibility, quotas and fakeroot/Singularity runtime remain unverified.
 No account, QoS or GPU type is invented or silently selected.
 
+Update from user-supplied Unity terminal output: the environment check, all 43 tests,
+and the tiny CUDA smoke passed inside an existing A100-80GB allocation. The first
+container build failed on the site's /nas bind; the recipe now precreates that bind
+destination. A successful rebuilt container, CLM episodes, and the dependency-driven
+Slurm campaigns are still unverified. See [Unity validation](docs/UNITY_VALIDATION.md).
+
 Official references:
 [sbatch](https://docs.unity.rc.umass.edu/documentation/jobs/sbatch/),
 [GPUs](https://docs.unity.rc.umass.edu/documentation/tools/gpus/),
@@ -334,3 +340,28 @@ Local inference disables proxy routing (`NO_PROXY=*`) and sets
 an unrelated pricing-map download at import time on compute nodes. It does not supply
 credentials or contact an external model API. The readiness check imports both original
 agent classes as well as checking their budget counters.
+
+## Container build failure: missing /nas destination
+
+On the observed Unity node, a site bind of `/nas` is applied while entering the writable
+build container for `%post`. Without that directory in the image, Apptainer cannot
+create the bind point with overlay/underlay and stops before package installation.
+The definition file now creates `$APPTAINER_ROOTFS/nas` in `%setup`, before that mount.
+It never creates or modifies the host `/nas` directory. This follows the documented
+[build bind-point workaround](https://apptainer.org/docs/user/1.5/build_a_container.html#bind).
+
+For the reported failure, preserve the failed preparation log and rename the incomplete
+task destination to a unique `.failed-nas-<timestamp>` sibling before retrying. Keep the
+model/data assets and shared OCI cache: they are independent of this failed task build.
+Do not retry concurrently with an active preparation process. Use the committed updated
+recipe and a new log filename. The task lock records the new recipe and image hashes.
+
+This fix changes the recipe, documentation and ignore rules only; the installed Python
+package and frozen dependency environment do not need reinstallation. Before updating
+the checkout, confirm that no campaign is using it directly and that tracked changes
+are absent. Existing submitted campaigns keep their original immutable snapshots.
+
+The xattr `ENOTSUP` warnings and root-mapped fakeroot fallback were not the fatal error
+in the supplied log. Do not add `--ignore-fakeroot-command` or disable containment on
+that basis. If a different bind destination or a subsequent fakeroot error appears,
+capture that exact failure rather than treating this patch as a verified complete build.

@@ -24,3 +24,5 @@ snapshots/
 campaigns/
 cache/
 .pytest_cache/
+# setuptools creates this during the non-editable Unity package installation.
+/build/
