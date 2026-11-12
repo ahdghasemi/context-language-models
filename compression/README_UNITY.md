@@ -1,8 +1,11 @@
 # Unity / Slurm operating instructions
 
-After the passed client-transport probe, the next bounded diagnostic is the
-[inference-only 4B backbone screen](docs/BACKBONE_SCREEN.md). It reuses the existing
-environment/container, runs two episodes, and cannot authorize compression.
+The [4B backbone screen](docs/BACKBONE_SCREEN.md) passed export fidelity but
+scored zero in both modes. Saved responses show omitted answer blocks and
+wrong-file lookups. The next bounded experiment is the
+[separate formatting reminder](docs/FORMAT_SCREEN.md): it reuses the verified
+export, runs two episodes, and cannot authorize compression. It does not change
+the old scores or the original task/grading path.
 
 The user-submitted `baseline-003` completed all nine Slurm stages, including real-model
 evaluation and GPU profiling. **Its capability gate failed: all four CLM and four

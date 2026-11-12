@@ -101,13 +101,20 @@ inference or Unity submission was performed while adding this diagnostic.
 
 ## Next experiment depends on this diagnosis
 
+The user subsequently executed the full audit: **19/24** queries contained the
+exact expected value as a complete line; **0/24** had correct answer blocks.
+There were no conflicting or unpaired call records. The five other queries
+searched the first batch file for keys in the second batch and returned only
+the readiness marker. See [the separate formatting experiment](FORMAT_SCREEN.md)
+for the diagnosis, unchanged official scores and a bounded next experiment.
+
 If retrieval is correct but answer framing is consistently missing, the next
 bounded experiment should isolate a disclosed protocol-formatting reminder,
 with the original failed screen retained as its control. It must leave the
 official grader unchanged and use the same prospective protocol for dense and
 compressed models. Such a variant changes the evaluation setup and must be
-identified in configuration, provenance and later claims. It is not implemented
-or evaluated by this read-only audit.
+identified in configuration, provenance and later claims. It is implemented
+separately; this read-only audit neither applies nor evaluates that reminder.
 
 Append-only's output-cap failure is a separate issue. Increasing the output
 cap, changing the reminder, and changing the prompt together would confound the

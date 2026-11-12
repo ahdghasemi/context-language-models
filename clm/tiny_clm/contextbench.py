@@ -15,6 +15,7 @@ import urllib.request
 from .io import digest, exclusive, file_sha, metadata, read_json, write_json
 from .container import container_environment
 from .provenance import select_task_records, LEGACY_INFERENCE_RUNTIME
+from .answer_format import protocol_identity, agent_path, application_valid
 
 
 def tree_hash(root):
@@ -152,7 +153,9 @@ def wait_server(process, url, expected_sha, deadline=180, expected_runtime=None)
     raise TimeoutError("reference server did not become ready")
 
 
-def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, server_timeout=180):
+def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, server_timeout=180,
+        diagnostic_protocol=None):
+    protocol = protocol_identity(diagnostic_protocol)
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
     cb, lock = config["contextbench"], read_json(lock_path)
@@ -176,8 +179,7 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
     subprocess.run([sys.executable, "-c", check], env=env, check=True)
     episodes = []
     for mode in cb["modes"]:
-        agent = {"clm": "clm_contextbench:ClmStream",
-                 "append_only": "contextbench.harbor.agents.base:ContextBenchAgent"}[mode]
+        agent = agent_path(mode, diagnostic_protocol)
         for ti, task in enumerate(lock["tasks"]):
             if task["path"] not in selected:
                 continue  # Preserve original task indices (and model RNG seeds).
@@ -189,6 +191,7 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
             if record_path.exists():
                 record = read_json(record_path)
                 if (record["weight_sha256"] != spec["weight_sha256"] or record["request_hash"] != digest(cb) or
+                        record.get("diagnostic_protocol") != protocol or
                         record.get("inference_runtime", LEGACY_INFERENCE_RUNTIME) != runtime):
                     raise ValueError("existing episode belongs to another experiment")
                 episodes.append(record)
@@ -234,6 +237,12 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
                     rewards = (result.get("verifier_result") or {}).get("rewards") or {}
                     requests = [json.loads(x) for x in usage_path.read_text().splitlines()] if usage_path.exists() else []
                     error = result.get("exception_info")
+                    application = None
+                    if protocol is not None:
+                        application_path = out/"trials"/name/"agent/answer_format_protocol.json"
+                        application = read_json(application_path) if application_path.exists() else None
+                        if not application_valid(application, protocol):
+                            error = error or {"type": "ProtocolApplicationError", "message": "missing or inconsistent prompt intervention record"}
                     # Scored low/zero reward is a valid negative result. Infrastructure/agent exceptions are failures.
                     status = "complete" if process.returncode == 0 and not error and rewards.get("grader_valid") == 1 else "failed"
                     record = {"episode": path.name, "mode": mode, "status": status, "rewards": rewards,
@@ -245,6 +254,8 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
                         "context_lengths": [r["prompt_tokens"] for r in requests],
                         "weight_sha256": spec["weight_sha256"], "task_sha256": task["sha256"],
                         "inference_runtime": runtime}
+                    if protocol is not None:
+                        record.update(diagnostic_protocol=protocol, protocol_application=application)
                     write_json(record_path, record)
                     episodes.append(record)
                 except Exception as exc:
@@ -253,6 +264,8 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
                               "request_hash": digest(cb), "weight_sha256": spec["weight_sha256"],
                               "task_sha256": task["sha256"], "elapsed_seconds": time.perf_counter()-start,
                               "inference_runtime": runtime}
+                    if protocol is not None:
+                        record["diagnostic_protocol"] = protocol
                     write_json(record_path, record)
                     episodes.append(record)
                 finally:
@@ -269,6 +282,9 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
               "scope": "original CLM harness and ContextBench append-only agent; substituted Qwen3 backbone and stated decoding"}
     if task_names is not None:
         result["screen_task_names"] = list(task_names)
+    if protocol is not None:
+        result["diagnostic_protocol"] = protocol
+        result["scope"] = "prompt-format diagnostic using original agent loops; not the original prompt protocol"
     write_json(out/"summary.json", result)
     if not result["all_complete"]:
         raise RuntimeError("ContextBench has failed episodes; see summary.json and logs")

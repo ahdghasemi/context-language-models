@@ -33,6 +33,8 @@ def main():
                    "--recipe", str(snapshot/"compression/contextbench.def")]
     elif stage == "cache_audit":
         command = [sys.executable, "-m", "tiny_clm.cache_audit", str(manifest)]
+    elif stage.startswith("protocol_"):
+        command = [sys.executable, "-m", "tiny_clm.protocol_screen", str(manifest), stage]
     elif stage.startswith("screen_"):
         command = [sys.executable, "-m", "tiny_clm.screen", str(manifest), stage]
     elif stage == "aggregate":

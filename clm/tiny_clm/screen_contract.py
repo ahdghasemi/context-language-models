@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 
 from .provenance import canonical_hash, select_task_records, INFERENCE_RUNTIME
+from .answer_format import protocol_identity, application_valid
 
 CACHE_CONTRACT = "native-reference-cache-v1"
 CACHE_CASES = ("screen_last_token", "screen_suffix_8", "synthetic_2048_suffix_8")
@@ -79,8 +80,9 @@ def qwen3_counts(c):
             "training_subtotal_excluding_workspaces_bytes": 16*p + 8*mlp}
 
 
-def screen_report(config, lock, audit, summary):
+def screen_report(config, lock, audit, summary, *, diagnostic_protocol=None):
     """No screen, even a passing one, is accepted as a baseline/pilot gate."""
+    protocol = protocol_identity(diagnostic_protocol)
     tasks = select_task_records(lock["tasks"], config["screen"]["task_names"])
     expected = {(m, Path(t["path"]).name): t["sha256"]
                 for m in config["contextbench"]["modes"] for t in tasks}
@@ -88,6 +90,7 @@ def screen_report(config, lock, audit, summary):
     if not export_verified(audit, config["model"]):
         errors.append("missing or incompatible export audit")
     if (not summary or not summary.get("all_complete") or
+            summary.get("diagnostic_protocol") != protocol or
             summary.get("contextbench") != config["contextbench"] or
             summary.get("screen_task_names") != config["screen"]["task_names"] or
             summary.get("inference_runtime") != INFERENCE_RUNTIME or
@@ -100,6 +103,8 @@ def screen_report(config, lock, audit, summary):
         reward = rewards.get("reward")
         valid = isinstance(reward, (int, float)) and math.isfinite(reward) and 0 <= reward <= 1
         if (key not in expected or key in seen or ep.get("status") != "complete" or ep.get("error") or
+                ep.get("diagnostic_protocol") != protocol or
+                (protocol is not None and not application_valid(ep.get("protocol_application"), protocol)) or
                 ep.get("returncode") != 0 or rewards.get("grader_valid") != 1 or not valid or
                 ep.get("weight_sha256") != (audit or {}).get("weight_sha256") or
                 ep.get("inference_runtime") != INFERENCE_RUNTIME or
@@ -113,7 +118,8 @@ def screen_report(config, lock, audit, summary):
         errors.append("episode coverage differs from the declared screen subset")
     complete = not errors
     clm = [e["rewards"]["reward"] for e in records if e["mode"] == "clm"] if complete else []
-    return {"gate_type": "backbone_screen", "inference_runtime": INFERENCE_RUNTIME,
+    return {"gate_type": "protocol_screen" if protocol else "backbone_screen",
+            "diagnostic_protocol": protocol, "inference_runtime": INFERENCE_RUNTIME,
             "cache_verification_contract": CACHE_CONTRACT,
             "export_verified": export_verified(audit, config["model"]),
             "passed": complete and bool(clm) and
@@ -121,5 +127,6 @@ def screen_report(config, lock, audit, summary):
             "complete": complete, "errors": errors, "episodes": records,
             "model": config["model"], "can_advance_to_compression": False,
             "threshold_provisional": True, "min_clm_reward": config["screen"]["min_clm_reward"],
-            "scope": "one diagnostic subset; a pass permits a full baseline and memory audit only; "
+            "scope": ("changed-prompt diagnostic only; not the original baseline; " if protocol else "") +
+                     "one diagnostic subset; a pass permits a full baseline and memory audit only; "
                      "no compression, language-quality, speedup, or population-level claim"}

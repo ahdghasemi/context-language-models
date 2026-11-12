@@ -17,6 +17,9 @@ from tiny_clm.provenance import protocol_contract, INFERENCE_RUNTIME, LEGACY_INF
 
 
 def validate_episodes(config, summary):
+    if summary.get("diagnostic_protocol") is not None or any(
+            e.get("diagnostic_protocol") is not None for e in summary["episodes"]):
+        raise ValueError("diagnostic prompt variants cannot be aggregated as original-protocol results")
     cb = config["contextbench"]
     if summary["contextbench"] != cb or summary["source_revision"] != cb["revision"]:
         raise ValueError("ContextBench results use different tasks or decoding settings")
