@@ -14,6 +14,11 @@ adaptation, not an exact reproduction of the upstream container; see
 The ContextBench repository is downloaded separately by the workflow;
 its authorship and original task/skill/grading code are preserved.
 
+`compression/audit_kv_responses.py` uses the ANSWER-block regular expression
+from `contextbench/graders/kv.py` at the same pinned Apache-2.0 revision. Its
+surrounding code is a separate read-only diagnostic, not a modified benchmark
+grader. The original license is included as `ContextBench-LICENSE`.
+
 The ASVD baseline is an independent implementation of the published algorithm, with
 source/revision and explicit differences documented in `docs/RELATED_WORK.md`.
 Supplied private GNN/Flow code and manuscripts are not redistributed.

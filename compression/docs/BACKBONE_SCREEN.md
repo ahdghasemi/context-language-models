@@ -27,7 +27,10 @@ Primary sources inspected:
 
 The same audited Qwen3 architecture is supported by the installed Transformers
 4.57.1. Its native tool tags remain compatible with the reference server. The actual
-weights and GPU export/cache checks have **not** yet been run in this screen.
+weights and GPU export/cache checks have now been exercised by the user. The
+screen at `3d3a7b8dd6d2cd2868ebb814dfc096269e3088ab` passed the native-reference
+export contract but scored zero in both modes. See
+[the observed response failures and read-only audit](KV_RESPONSE_AUDIT.md).
 
 The screen runs only `kv-store-R130-seed1101` under both original agents. It preserves
 all baseline-003 context settings, prompts, skills, tokenizer counter, task bytes,

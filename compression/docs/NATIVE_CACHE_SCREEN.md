@@ -77,8 +77,11 @@ BF16 model through all three probe inputs and physical save/reload. Tests keep
 native cached/full differences visible even when export fidelity passes.
 
 The full CPU suite passed from a read-only archive without Git metadata:
-**118 passed, 1 SDK-dependent test skipped**. The integrated screen must still
-run on the target GPU. A successful export permits the two ContextBench
-episodes to start. Only adequate observed
+**118 passed, 1 SDK-dependent test skipped**. The user subsequently ran the
+integrated screen at commit `3d3a7b8dd6d2cd2868ebb814dfc096269e3088ab`.
+Export fidelity passed, including zero full-sequence reload error and native/
+export generated-token equality in both execution modes. Both ContextBench
+episodes completed with zero reward. See [the response diagnosis](KV_RESPONSE_AUDIT.md).
+A successful export permits the two ContextBench episodes to start. Only adequate observed
 CLM reward permits a full baseline and training-memory audit; it does not
 authorize compression training or establish publication-level quality.
