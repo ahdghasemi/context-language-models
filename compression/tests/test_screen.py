@@ -119,9 +119,10 @@ def load_driver(monkeypatch):
     return driver
 
 
-def test_real_snapshot_mock_scheduler_and_dry_run(tmp_path, monkeypatch):
-    driver = load_driver(monkeypatch)
-    cfg, ref, lock, _, _ = fixture()
+@pytest.fixture
+def git_repo(tmp_path):
+    # Slurm runs a git archive without .git. Submission tests must supply their
+    # own checkout rather than discovering a repository above the test sources.
     repo = tmp_path/"repo"
     repo.mkdir()
     (repo/"source.py").write_text("# committed fixture\n")
@@ -129,6 +130,13 @@ def test_real_snapshot_mock_scheduler_and_dry_run(tmp_path, monkeypatch):
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
     subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                     "commit", "-qm", "fixture"], check=True)
+    return repo
+
+
+def test_real_snapshot_mock_scheduler_and_dry_run(tmp_path, monkeypatch, git_repo):
+    driver = load_driver(monkeypatch)
+    cfg, ref, lock, _, _ = fixture()
+    repo = git_repo
     monkeypatch.setattr(driver, "ROOT", repo)
     monkeypatch.setattr(sys.modules["submit"], "ROOT", repo)
     ref.update(contextbench_dir=str(tmp_path), venv="/fixture/env", environment={"freeze_sha256": "unchanged"})
@@ -198,8 +206,9 @@ def test_environment_failure_blocks_all_submissions(tmp_path, monkeypatch):
     assert not (tmp_path/"blocked").exists()
 
 
-def test_prepare_only_dry_run_has_no_gpu_or_inference(tmp_path, monkeypatch, capsys):
+def test_prepare_only_dry_run_has_no_gpu_or_inference(tmp_path, monkeypatch, capsys, git_repo):
     driver = load_driver(monkeypatch)
+    monkeypatch.setattr(driver, "ROOT", git_repo)
     cfg, ref, lock, _, _ = fixture()
     ref.update(contextbench_dir=str(tmp_path), venv="/fixture/env")
     for name, value in [("config.json", cfg), ("reference.json", ref), ("contextbench-lock.json", lock)]:
@@ -209,4 +218,6 @@ def test_prepare_only_dry_run_has_no_gpu_or_inference(tmp_path, monkeypatch, cap
     out = capsys.readouterr().out
     assert "screen_prepare" in out and "screen_check" in out
     assert "screen_export" not in out and "--gpus=" not in out
+    commit = subprocess.check_output(["git", "-C", str(git_repo), "rev-parse", "HEAD"], text=True).strip()
+    assert json.loads(out[out.index("{\n"):])["commit"] == commit
     assert not (tmp_path/"absent").exists()
