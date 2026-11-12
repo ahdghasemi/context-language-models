@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 
-from .answer_format import FORMAT_ID, FORMAT_TEXT, protocol_identity
+from .answer_format import FORMAT_ID, TOOL_FORMAT_ID, protocol_identity, protocol_text
 from .provenance import verify_snapshot, INFERENCE_RUNTIME
 from .screen_contract import screen_report, export_verified
 
@@ -57,7 +58,59 @@ def validate_source(manifest, *, verify_weights=False):
     return source, lock, audit, summary
 
 
-def evidence_files(manifest, source):
+TOOL_SCREEN_TASKS = ["kv-store-R1000-seed1101", "kv-store-R130-seed1102"]
+
+
+def validate_reference(manifest, identifier=FORMAT_ID, *, verify_weights=False):
+    """Original screen for answer-only; completed validation for tool guidance.
+
+    A valid negative source is allowed. Never silently turn a diagnostic into
+    a baseline gate or change task locks to accommodate a prompt intervention.
+    """
+    protocol_identity(identifier)
+    if identifier == FORMAT_ID:
+        source, lock, audit, baseline = validate_source(manifest, verify_weights=verify_weights)
+        return source, lock, audit, baseline, source["config"]
+    if identifier != TOOL_FORMAT_ID:
+        raise ValueError("unsupported screen protocol")
+    from .protocol_validation import verify_inputs as verify_validation, validation_report
+    parent = read(manifest)
+    root = Path(parent["campaign"])
+    if (parent.get("stage") != "protocol_validation" or
+            read(root/"config.json") != parent["config"] or
+            (root/"reminder.txt").read_text() != protocol_text(FORMAT_ID)):
+        raise ValueError("tool-format screen requires the completed answer-format validation")
+    dev, source, lock, audit = verify_validation(parent, verify_weights=verify_weights)
+    baseline = read(root/"contextbench/summary.json")
+    parent["manifest_sha256"] = sha(manifest)
+    computed = validation_report(parent, dev, lock, audit, baseline, read(root/"memory-probe.json"))
+    saved = read(root/"validation-report.json")
+    checks = read(root/"checks.json")
+    if (not computed["complete"] or saved.get("manifest_sha256") != sha(manifest) or
+            checks.get("passed") is not True or checks.get("manifest_sha256") != sha(manifest) or
+            any(saved.get(k) != computed[k] for k in computed)):
+        raise ValueError("validation source report is incomplete or inconsistent")
+    for ep in baseline["episodes"]:
+        if read(root/"contextbench"/(ep["mode"]+"--"+ep["episode"]+".json")) != ep:
+            raise ValueError("source validation episode differs from summary")
+    cfg = copy.deepcopy(parent["config"])
+    if not set(TOOL_SCREEN_TASKS) <= set(cfg["screen"]["task_names"]):
+        raise ValueError("source lacks required diagnostic tasks")
+    cfg["screen"]["task_names"] = list(TOOL_SCREEN_TASKS)
+    return source, lock, audit, baseline, cfg
+
+
+def evidence_files(manifest, source, identifier=FORMAT_ID):
+    if identifier == TOOL_FORMAT_ID:
+        parent = read(manifest)
+        root = Path(parent["campaign"])
+        paths = [Path(manifest)] + [root/name for name in ("config.json", "reminder.txt", "checks.json",
+            "validation-report.json", "memory-probe.json", "contextbench/summary.json")]
+        paths += [root/"contextbench"/(ep["mode"]+"--"+ep["episode"]+".json")
+                  for ep in read(root/"contextbench/summary.json")["episodes"]]
+        return {**parent["source_files"], **{str(p.resolve()): sha(p) for p in paths}}
+    if identifier != FORMAT_ID:
+        raise ValueError("unknown source evidence protocol")
     root = Path(source["campaign"])
     paths = [Path(manifest), Path(source["contextbench_lock"])]
     paths += [root/name for name in ("config.json", "export-audit.json", "screen-report.json", "contextbench/summary.json")]
@@ -68,15 +121,16 @@ def evidence_files(manifest, source):
 
 
 def verify_inputs(spec, *, verify_weights=False):
-    source, lock, audit, summary = validate_source(spec["source_manifest"], verify_weights=verify_weights)
-    if (source["config"] != spec["config"] or evidence_files(spec["source_manifest"], source) != spec["source_files"]
-            or spec.get("diagnostic_protocol") != protocol_identity(FORMAT_ID)):
+    identifier = spec["diagnostic_protocol"]["id"]
+    source, lock, audit, summary, cfg = validate_reference(spec["source_manifest"], identifier, verify_weights=verify_weights)
+    if (cfg != spec["config"] or evidence_files(spec["source_manifest"], source, identifier) != spec["source_files"]
+            or spec.get("diagnostic_protocol") != protocol_identity(identifier)):
         raise ValueError("source evidence or declared protocol changed after submission")
     return source, lock, audit, summary
 
 
-def compare_report(config, lock, audit, baseline, variant):
-    report = screen_report(config, lock, audit, variant, diagnostic_protocol=FORMAT_ID)
+def compare_report(config, lock, audit, baseline, variant, *, diagnostic_protocol=FORMAT_ID):
+    report = screen_report(config, lock, audit, variant, diagnostic_protocol=diagnostic_protocol)
     controls = {(e["mode"], e["episode"]): e for e in baseline["episodes"]}
     report["comparison"] = [{"mode": e["mode"], "episode": e["episode"],
         "original_reward": controls[e["mode"], e["episode"]]["rewards"]["reward"],
@@ -86,6 +140,17 @@ def compare_report(config, lock, audit, baseline, variant):
         for e in report["episodes"]] if report["complete"] else []
     report["scope"] = ("one development task; historical original-prompt control and one formatting-reminder run per mode; "
                        "no original-score revision, compression authorization, statistical generalization or speedup claim")
+    if diagnostic_protocol == TOOL_FORMAT_ID:
+        # The control here already includes answer-format-v1, not the original prompt.
+        for row in report["comparison"]:
+            row["answer_format_control_reward"] = row.pop("original_reward")
+            row["tool_guidance_reward"] = row.pop("reminder_reward")
+            row["answer_format_control_answered"] = row.pop("original_answered")
+            row["tool_guidance_answered"] = row.pop("reminder_answered")
+        report.update(gate_type="tool_call_screen", control_protocol=protocol_identity(FORMAT_ID),
+            scope="two previously failed tasks in both modes; initial tool-call guidance added to the fixed answer reminder; "
+                  "historical controls; unchanged parser, execution, decoding and grading; "
+                  "development diagnostic only, no compression authorization or held-out-quality claim")
     return report
 
 
@@ -93,12 +158,13 @@ def main():
     from .io import write_json, metadata
     manifest, stage = Path(sys.argv[1]), sys.argv[2]
     spec = read(manifest)
+    identifier = spec["diagnostic_protocol"]["id"]
     campaign, snapshot = Path(spec["campaign"]), Path(spec["snapshot"])
     if not os.environ.get("SLURM_JOB_ID"):
         raise RuntimeError("protocol stages require a Slurm allocation")
     verify_snapshot(snapshot, spec["snapshot_hash"])
     if (spec["stage"] != "protocol_screen" or read(campaign/"config.json") != spec["config"]
-            or (campaign/"reminder.txt").read_text() != FORMAT_TEXT):
+            or (campaign/"reminder.txt").read_text() != protocol_text(identifier)):
         raise ValueError("protocol campaign configuration differs")
     source, lock, audit, baseline = verify_inputs(spec, verify_weights=stage != "protocol_report")
     if stage == "protocol_check":
@@ -108,9 +174,10 @@ def main():
             "--junitxml="+str(campaign/"correctness.xml"), "-o", "cache_dir="+str(campaign/"pytest-cache")], check=True)
         env = dict(os.environ, PYTHONPATH=lock["source"]+os.pathsep+str(snapshot/"clm"))
         # Exercise real installed Harbor/ContextBench imports before allocating the GPU stage.
-        subprocess.run([sys.executable, "-c", "from tiny_clm.contextbench_protocol import FormatReminderClm, FormatReminderAppendOnly; "
+        subprocess.run([sys.executable, "-c", "from tiny_clm.contextbench_protocol import FormatReminderClm, FormatReminderAppendOnly, ToolFormatReminderClm, ToolFormatReminderAppendOnly; "
             "from clm_contextbench import ClmStream; from contextbench.harbor.agents.base import ContextBenchAgent; "
             "assert issubclass(FormatReminderClm, ClmStream); assert issubclass(FormatReminderAppendOnly, ContextBenchAgent); "
+            "assert issubclass(ToolFormatReminderClm, ClmStream); assert issubclass(ToolFormatReminderAppendOnly, ContextBenchAgent); "
             "print('FORMAT_ADAPTER_IMPORTS_PASSED')"], env=env, check=True)
         write_json(campaign/"checks.json", {"passed": True, "diagnostic_protocol": spec["diagnostic_protocol"], "metadata": metadata()})
     elif stage == "protocol_contextbench":
@@ -125,10 +192,11 @@ def main():
             raise FileExistsError("preserve prior or partial results; use a new campaign")
         run(Path(source["campaign"])/"export", spec["config"], source["contextbench_lock"], campaign/"contextbench",
             task_names=spec["config"]["screen"]["task_names"],
-            server_timeout=spec["config"]["screen"]["server_start_timeout"], diagnostic_protocol=FORMAT_ID)
+            server_timeout=spec["config"]["screen"]["server_start_timeout"], diagnostic_protocol=identifier)
     elif stage == "protocol_report":
         path = campaign/"contextbench/summary.json"
-        report = compare_report(spec["config"], lock, audit, baseline, read(path) if path.exists() else None)
+        report = compare_report(spec["config"], lock, audit, baseline, read(path) if path.exists() else None,
+            diagnostic_protocol=identifier)
         checks = campaign/"checks.json"
         if not checks.exists() or not read(checks).get("passed"):
             report["errors"].append("prerequisite correctness checks did not pass")

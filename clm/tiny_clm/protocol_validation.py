@@ -17,7 +17,7 @@ from .training_memory import probe_config, estimates
 
 def development(manifest, *, verify_weights=False):
     spec = read(manifest)
-    if spec.get("stage") != "protocol_screen":
+    if spec.get("stage") != "protocol_screen" or spec.get("diagnostic_protocol") != protocol_identity(FORMAT_ID):
         raise ValueError("requires the completed format-development manifest")
     root = Path(spec["campaign"])
     if read(root/"config.json") != spec["config"] or (root/"reminder.txt").read_text() != FORMAT_TEXT:

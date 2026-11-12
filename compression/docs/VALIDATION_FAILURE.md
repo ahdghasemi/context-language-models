@@ -1,5 +1,10 @@
 # Four-task validation: memory fits, behavior gate fails
 
+Follow-up: the user supplied the requested saved-response inspection. All three
+inspected failed CLM episodes emitted ordinary command text without hitting the
+output cap; the append-only example first truncated a tool call. See
+[the diagnosis and isolated tool-call-guidance test](TOOL_FORMAT_SCREEN.md).
+
 ## Evidence received
 
 The user supplied Unity output for the campaign produced by commit

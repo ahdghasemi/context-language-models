@@ -5,7 +5,7 @@ detached hard-rank auxiliary projections, an unnormalized squared-Frobenius coup
 penalty scaled by **1/(2μ)**, and decreasing-μ continuation. The default preserves the
 original GNN Adam/StepLR state across stages. The separately supplied Regularized method is not used. SVD, recovery training and ASVD are separately named controls.
 
-**Evidence boundary:** the latest local CPU suite passed 176 tests, with one SDK-
+**Evidence boundary:** the latest local CPU suite passed 191 tests, with one SDK-
 dependent test skipped, from a read-only source archive. Earlier CPU dense/SVD checks
 are recorded in the [execution report](docs/EXECUTION.md). The user subsequently
 executed Unity baseline evaluation, GPU profiling and ContextBench episodes. The
@@ -19,6 +19,10 @@ the development result repeated, all three additional CLM tasks scored zero, and
 the two-update probe left 5.04 GiB of GPU reserved-memory headroom. The behavior
 gate remains failed. Quality training and preserved CLM capability after compression
 remain unestablished; no deployment speedup is claimed.
+
+The [saved-response diagnosis](docs/TOOL_FORMAT_SCREEN.md) now separates CLM
+non-tool command text from append-only truncation. A bounded four-episode
+tool-call-guidance test is implemented; its GPU result remains untested.
 
 CLM is a context-file-editing harness around a language model. This extension compresses
 the neural backbone, while using the original `ClmStream` agent and ContextBench grader.

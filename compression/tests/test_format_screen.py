@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tiny_clm.answer_format import (FORMAT_ID, FORMAT_TEXT, FormatReminderMixin, add_reminder,
+from tiny_clm.answer_format import (FORMAT_ID, TOOL_FORMAT_ID, FORMAT_TEXT, FormatReminderMixin, add_reminder,
     protocol_identity, agent_path, application_valid, text_sha)
 from tiny_clm.protocol_screen import validate_source, evidence_files, verify_inputs, compare_report, sha
 from tiny_clm.provenance import require_gate, verify_snapshot, INFERENCE_RUNTIME
@@ -221,7 +221,8 @@ def test_submission_snapshots_source_and_uses_three_correctly_dependent_jobs(tmp
         driver.main(args+["--submit"])
 
 
-@pytest.mark.parametrize("protocol,missing_application", [(None, False), (FORMAT_ID, False), (FORMAT_ID, True)])
+@pytest.mark.parametrize("protocol,missing_application", [(None, False), (FORMAT_ID, False), (FORMAT_ID, True),
+                                                        (TOOL_FORMAT_ID, False), (TOOL_FORMAT_ID, True)])
 def test_contextbench_routes_agents_preserves_settings_and_records_applied_protocol(tmp_path, monkeypatch, protocol, missing_application):
     from tiny_clm import contextbench as cb
     cfg, _, lock, _, _ = fixture()
@@ -250,7 +251,9 @@ def test_contextbench_routes_agents_preserves_settings_and_records_applied_proto
         name = command[command.index("--trial-name")+1]
         save(out/"trials"/name/"result.json", {"verifier_result": {"rewards": {"grader_valid": 1, "reward": 0}}})
         if protocol and not missing_application:
-            save(out/"trials"/name/"agent/answer_format_protocol.json", application())
+            applied = application()
+            applied["diagnostic_protocol"] = protocol_identity(protocol)
+            save(out/"trials"/name/"agent/answer_format_protocol.json", applied)
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(cb.subprocess, "run", run)
     args = (artifact, cfg, lock_path, out)
