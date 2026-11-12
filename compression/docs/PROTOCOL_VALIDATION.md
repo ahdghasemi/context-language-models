@@ -1,5 +1,9 @@
 # Fixed-protocol dense behavior validation and training-memory probe
 
+Subsequent result: the user executed this workflow on Unity. The memory probe
+passed; the three additional CLM tasks all scored zero. See the
+[measured outcome and next read-only diagnostic](VALIDATION_FAILURE.md).
+
 ## Observed result and its limits
 
 The user-supplied Unity report for the `kv-answer-format-v1` development run

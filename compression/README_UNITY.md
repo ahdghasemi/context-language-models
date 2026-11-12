@@ -1,11 +1,10 @@
 # Unity / Slurm operating instructions
 
-The [formatting-reminder development run](docs/FORMAT_SCREEN.md) completed on
-Unity: CLM scored 23/24 with all queries answered; append-only still executed
-zero tools. The next step is [eight fixed-protocol episodes and a training-memory
-probe](docs/PROTOCOL_VALIDATION.md). This reuses the verified 4B export, separates
-the development task from additional validation, and cannot launch a training
-grid. The original prompt's zero scores remain unchanged.
+The [expanded fixed-protocol validation](docs/VALIDATION_FAILURE.md) completed on
+Unity: the development task again scored 23/24, but all three additional CLM
+tasks scored zero. The two-update memory probe passed with 5.04 GiB headroom;
+the behavior gate failed. Use the read-only failed-response diagnostic before
+submitting another GPU experiment. Earlier scores and gates remain unchanged.
 
 The user-submitted `baseline-003` completed all nine Slurm stages, including real-model
 evaluation and GPU profiling. **Its capability gate failed: all four CLM and four
