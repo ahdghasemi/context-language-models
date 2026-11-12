@@ -30,7 +30,7 @@ export APPTAINER_TMPDIR="$TMPDIR" SINGULARITY_TMPDIR="$TMPDIR"
 trap 'rm -rf -- "$TMPDIR"' EXIT
 case "$STAGE" in
   correctness|smoke|prepare|aggregate|screen_check|screen_prepare|screen_report|protocol_check|protocol_report|validation_check|validation_report) STEP_RESOURCE=--cpu ;;
-  environment|train|export|evaluate|profile|contextbench|screen_export|screen_contextbench|cache_audit|protocol_contextbench|validation_contextbench|validation_memory) STEP_RESOURCE=--gpu ;;
+  environment|train|export|evaluate|profile|contextbench|screen_export|screen_contextbench|cache_audit|history_audit|protocol_contextbench|validation_contextbench|validation_memory) STEP_RESOURCE=--gpu ;;
   *) echo "Unknown stage: $STAGE" >&2; exit 2 ;;
 esac
 "$TINY_CLM_VENV/bin/python" -m tiny_clm.slurm "$STEP_RESOURCE" -- \

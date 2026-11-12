@@ -27,7 +27,8 @@ success or an efficiency improvement. The reported 10 parsed calls alone do not
 certify their exit status; inspect saved tool results and usage.
 
 The two CLM rewards average 23/48 = 0.479167. The complete failure on R1000 is
-scientifically material even apart from the provisional 0.5 screen threshold.
+scientifically material. The screen requires **each** CLM task to reach the
+provisional 0.5 threshold; it does not gate on the mean.
 Both append-only episodes still produced zero parsed calls and 1,786 completion
 tokens. Matching previous totals suggests a recurring failure pattern, but does
 not establish truncation in these new runs without inspecting their request logs.
@@ -43,6 +44,12 @@ trained or evaluated here. The original scores, provisional thresholds, and
 compression gate remain unchanged.
 
 ### Next step: inspect saved responses, with no GPU submission
+
+Update: the user supplied this inspection. It confirms R1000's first-GET non-call
+loop and both append-only truncations, including a random-value proposal in one
+append-only case. The [history-format audit](HISTORY_AUDIT.md) records the evidence
+and the next bounded inference-only comparison. The inspection commands below
+remain available for reproducing the diagnosis.
 
 The read-only inspector now includes the last parsed call and the first transition
 to a reply without a parsed call in its server-request samples. `--get-samples`

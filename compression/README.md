@@ -5,7 +5,7 @@ detached hard-rank auxiliary projections, an unnormalized squared-Frobenius coup
 penalty scaled by **1/(2μ)**, and decreasing-μ continuation. The default preserves the
 original GNN Adam/StepLR state across stages. The separately supplied Regularized method is not used. SVD, recovery training and ASVD are separately named controls.
 
-**Evidence boundary:** the latest local CPU suite passed 194 tests, with one SDK-
+**Evidence boundary:** the latest local CPU suite passed 204 tests, with one SDK-
 dependent test skipped, from a read-only source archive. Earlier CPU dense/SVD checks
 are recorded in the [execution report](docs/EXECUTION.md). The user subsequently
 executed Unity baseline evaluation, GPU profiling and ContextBench episodes. The
@@ -23,7 +23,10 @@ remain unestablished; no deployment speedup is claimed.
 The [tool-call-guidance experiment](docs/TOOL_FORMAT_SCREEN.md) completed on Unity:
 CLM R130/1102 improved from 0/24 to 23/24, but R1000/1101 and both append-only
 episodes remained at zero. The diagnostic gate failed. Its next step is a
-read-only inspection of the first GET and the transition to non-tool replies.
+small [history-format replay](docs/HISTORY_AUDIT.md): saved traces confirm a
+first-GET non-call loop after CLM serializes historical calls as plain text.
+That representation is an observed upstream mechanism; its causal contribution
+is untested. Append-only also exhibits truncation and a wrong-value proposal.
 
 CLM is a context-file-editing harness around a language model. This extension compresses
 the neural backbone, while using the original `ClmStream` agent and ContextBench grader.
