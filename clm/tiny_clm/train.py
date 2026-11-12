@@ -30,6 +30,8 @@ def validate(config):
         raise ValueError("invalid learning rate")
     if t.get("optimizer_policy", "gnn_persistent") not in {"gnn_persistent", "flow_reset"}:
         raise ValueError("optimizer_policy must be gnn_persistent or flow_reset")
+    if t.get("adam_foreach") is not None and type(t["adam_foreach"]) is not bool:
+        raise ValueError("adam_foreach must be null or a boolean")
     mu_schedule(**config["penalty"])
     constant = config.get("ablation_constant_mu")
     if constant is not None and not (math.isfinite(constant) and constant > 0):
@@ -161,7 +163,8 @@ def _train(model, train_data, val_data, cfg, root, resume, stop_after):
     def new_optimizer():
         # Original GNN: retain Adam moments across best-weight restoration.
         # Flow resets are an explicit, separately labeled ablation. No weight decay.
-        optimizer = torch.optim.Adam(model.parameters(), lr=t["lr"], betas=(0.9, 0.999))
+        optimizer = torch.optim.Adam(model.parameters(), lr=t["lr"], betas=(0.9, 0.999),
+                                     foreach=t.get("adam_foreach"))
         if t.get("optimizer_policy", "gnn_persistent") == "gnn_persistent":
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=t["stage_steps"],
                                                        gamma=math.sqrt(cfg["penalty"]["gamma"]))

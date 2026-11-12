@@ -1,5 +1,10 @@
 # One-factor answer-format experiment
 
+Update: the user subsequently completed this experiment on Unity. CLM answered
+all 24 queries and matched 23; append-only answered none and executed no tools.
+The original scores remain unchanged. See [the next validation workflow](PROTOCOL_VALIDATION.md)
+for the fixed-protocol four-task baseline and a separate training-memory probe.
+
 ## Diagnosis motivating this experiment
 
 The user ran the read-only KV audit on the original-prompt 4B screen. All 24
