@@ -64,10 +64,13 @@ def test_cli_locates_screen_and_baseline_transcripts(tmp_path, monkeypatch, caps
     (root/"summary.json").write_text(json.dumps({"episodes": [record], "diagnostic_protocol": protocol}))
     (root/"clm--fixture.json").write_text(json.dumps(record))
     (agent/"trajectory.json").write_text(json.dumps([{"role": "assistant", "content": "OBSERVED_REPLY"}]))
-    monkeypatch.setattr(sys, "argv", ["inspect_contextbench.py", "--campaign", str(tmp_path), "--episode", "clm--fixture"])
+    monkeypatch.setattr(sys, "argv", ["inspect_contextbench.py", "--campaign", str(tmp_path),
+        "--episode", "clm--fixture", "--get-samples", "2"])
     before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     inspector.main()
-    assert "OBSERVED_REPLY" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "OBSERVED_REPLY" in output
+    assert "No delivered GET header found" in output
     assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
 
 
@@ -85,11 +88,47 @@ def test_request_diagnostic_exposes_length_and_tool_transitions_without_executin
     assert result["first_length_request"] == 1 and result["first_parsed_tool_request"] == 6
     assert result["requests_at_output_limit"] == 1
     assert result["finish_reasons"] == {"length": 1, "stop": 7, "tool_calls": 1}
-    assert [r["request_number"] for r in result["samples"]] == [1, 2, 3, 6, 8, 9]
+    assert result["last_parsed_tool_request"] == 6
+    assert result["first_no_tool_after_tool_request"] == 7
+    assert [r["request_number"] for r in result["samples"]] == [1, 2, 3, 6, 7, 8, 9]
     assert path.read_bytes() == before
     for key, changed in (("model_calls", 8), ("tool_calls", 0), ("weight_sha256", "wrong")):
         with pytest.raises(ValueError, match="differs|differ"):
             inspector.request_diagnostic(path, {**record, key: changed}, 1024)
+
+
+def test_first_get_retained_responses_excludes_other_queries_and_deduplicates(tmp_path):
+    snapshots = tmp_path/"context_snapshots"
+    snapshots.mkdir()
+    header = {"role": "user", "content": "=== get 5 (23 op(s) remaining after this) ===\nGET K00035\n"}
+    reply = {"role": "assistant", "content": "bash {\"command\":\"not executed\"}"}
+    reminder = {"role": "user", "content": "No tool call."}
+    second = {"role": "assistant", "content": "Waiting for the next operation."}
+    other = {"role": "user", "content": "=== get 2 (22 op(s) remaining after this) ===\nGET K00010\n"}
+    contexts = [
+        [{"role": "user", "content": "The instruction mentions GET K99999."}],
+        [header], [header, reply, reminder], [header, reply, reminder],
+        [header, reply, reminder, second, reminder, other, {"role": "assistant", "content": "OTHER_QUERY"}],
+        [{"role": "assistant", "content": "HEADER_EDITED_AWAY"}],
+    ]
+    for index, context in enumerate(contexts):
+        (snapshots/f"turn-{index:04d}.json").write_text(json.dumps({"messages": context}))
+    before = {p: p.read_bytes() for p in snapshots.iterdir()}
+    target, source, replies = inspector.first_get_responses(tmp_path, 3)
+    assert target == ("5", "K00035") and source.name == "turn-0001.json"
+    assert [r[1] for r in replies] == [reply, second]
+    assert before == {p: p.read_bytes() for p in snapshots.iterdir()}
+    assert len(inspector.first_get_responses(tmp_path, 1)[2]) == 1
+
+
+@pytest.mark.parametrize("header_present", [False, True])
+def test_first_get_without_retained_answer_does_not_invent_a_response(tmp_path, header_present):
+    context = [{"role": "user", "content": "=== get 0 (23 op(s) remaining after this) ===\nGET K00001"}] if header_present else []
+    (tmp_path/"trajectory.json").write_text(json.dumps(context))
+    target, source, replies = inspector.first_get_responses(tmp_path, 2)
+    assert bool(target) == header_present
+    assert bool(source) == header_present
+    assert replies == []
 
 
 @pytest.mark.parametrize("fault", ["summary_protocol", "episode_protocol", "record"])

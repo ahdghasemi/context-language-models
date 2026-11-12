@@ -7,6 +7,11 @@ from collections import Counter
 import hashlib
 import json
 from pathlib import Path
+import re
+
+
+# Delivered operation headers, not GET mentions in instructions or shell code.
+GET = re.compile(r"^=== get (\d+) \(\d+ op\(s\) remaining after this\) ===\s*\nGET (K\d+)\s*$", re.MULTILINE)
 
 
 def read(path):
@@ -45,6 +50,46 @@ def excerpt(value, cap):
     return text
 
 
+def first_get_responses(agent, count):
+    """First distinct retained replies to the earliest observed delivered GET.
+
+    Snapshot order is evidence order, not a request/response alignment. Context
+    edits can change old messages, so these are excerpts, not execution records.
+    No task gold or live environment is read.
+    """
+    paths = sorted((agent/"context_snapshots").glob("turn-*.json"))
+    if (agent/"trajectory.json").is_file():
+        paths.append(agent/"trajectory.json")
+    target, source, selected, seen = None, None, [], set()
+    for path in paths:
+        context = messages(path)
+        active = None
+        for index, message in enumerate(context):
+            content = message.get("content")
+            matches = GET.findall(content) if message.get("role") == "user" and isinstance(content, str) else []
+            if matches:
+                active = matches[-1]
+                if target is None:
+                    target, source = active, path
+            if message.get("role") != "assistant" or active != target or target is None:
+                continue
+            following = []
+            for next_message in context[index+1:]:
+                if next_message.get("role") == "assistant":
+                    break
+                following.append(next_message)
+                if len(following) == 2:
+                    break
+            signature = json.dumps([message, following], sort_keys=True)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            selected.append((path, message, following))
+            if len(selected) >= count:
+                return target, source, selected
+    return target, source, selected
+
+
 def request_diagnostic(path, record, max_tokens=None):
     """Read usage only. Do not infer token/message alignment after context edits."""
     raw = path.read_bytes()
@@ -62,9 +107,11 @@ def request_diagnostic(path, record, max_tokens=None):
         raise ValueError(f"request log weights differ from episode record: {path}")
     lengths = [i for i, r in enumerate(rows) if r.get("finish_reason") == "length"]
     tools = [i for i, r in enumerate(rows) if r["tool_calls"] > 0]
+    lost_tools = [i for i in range(1, len(rows)) if rows[i-1]["tool_calls"] > 0 and rows[i]["tool_calls"] == 0]
     # Include transitions even when they fall outside the first/last samples.
     indices = sorted(set(range(min(3, len(rows)))) | set(range(max(0, len(rows)-2), len(rows)))
-                     | set(lengths[:1]) | set(tools[:1]))
+                     | set(lengths[:1]) | set(tools[:1]) | set(tools[-1:]) | set(lost_tools[:1])
+                     | ({tools[-1]+1} if tools and tools[-1]+1 < len(rows) else set()))
     fields = ("finish_reason", "prompt_tokens", "completion_tokens", "tool_calls", "elapsed_seconds")
     return {"request_file_sha256": hashlib.sha256(raw).hexdigest(), "totals": totals,
         "finish_reasons": dict(Counter(r.get("finish_reason", "missing") for r in rows)),
@@ -72,11 +119,13 @@ def request_diagnostic(path, record, max_tokens=None):
         "requests_at_output_limit": sum(r["completion_tokens"] == max_tokens for r in rows) if max_tokens else None,
         "first_length_request": lengths[0]+1 if lengths else None,
         "first_parsed_tool_request": tools[0]+1 if tools else None,
+        "last_parsed_tool_request": tools[-1]+1 if tools else None,
+        "first_no_tool_after_tool_request": lost_tools[0]+1 if lost_tools else None,
         "samples": [{"request_number": i+1, **{k: rows[i].get(k) for k in fields}} for i in indices],
         "scope": "server tool_calls count parsed replies, not confirmed executions; snapshot excerpts are not aligned to request numbers"}
 
 
-def inspect(root, name, count=2, chars=1400, max_tokens=None):
+def inspect(root, name, count=2, chars=1400, max_tokens=None, get_samples=0):
     agent = root/"trials"/name/"agent"
     print(f"\n=== {name} ===")
     record = read(root/(name+".json"))
@@ -110,6 +159,21 @@ def inspect(root, name, count=2, chars=1400, max_tokens=None):
             # A reminder or tool result helps distinguish text from executed actions.
             if index+1 < len(context) and context[index+1].get("role") in {"tool", "user"}:
                 print("FOLLOWING", excerpt(context[index+1], chars))
+    if get_samples:
+        target, source, replies = first_get_responses(agent, get_samples)
+        print("FIRST_GET_RETAINED_RESPONSES", json.dumps({
+            "query": {"qid": int(target[0]), "key": target[1]} if target else None,
+            "first_source": str(source) if source else None,
+            "scope": "distinct retained-message observations; not server-call alignment or confirmed execution"}))
+        if target is None:
+            print("No delivered GET header found in saved retained contexts.")
+        elif not replies:
+            print("GET header retained, but no subsequent assistant response retained.")
+        for path, message, following in replies:
+            print("GET_RESPONSE_SOURCE", path)
+            print("ASSISTANT", excerpt(message, chars))
+            for item in following:
+                print("FOLLOWING", excerpt(item, chars))
 
 
 def main():
@@ -120,9 +184,11 @@ def main():
                         help="Exact mode--task name; repeat for additional episodes")
     parser.add_argument("--samples", type=int, default=2)
     parser.add_argument("--chars", type=int, default=1400)
+    parser.add_argument("--get-samples", type=int, default=0,
+                        help="also show this many distinct retained replies to the first delivered GET")
     args = parser.parse_args()
-    if args.samples < 1 or args.chars < 100:
-        parser.error("samples must be positive and chars must be >=100")
+    if args.samples < 1 or args.chars < 100 or args.get_samples < 0:
+        parser.error("samples must be positive, chars >=100, and get-samples nonnegative")
     spec = read(args.campaign/"manifest.json")
     single_stages = {"backbone_screen", "protocol_screen", "protocol_validation"}
     if spec.get("stage") in single_stages:
@@ -155,7 +221,7 @@ def main():
                 parser.error("episode and summary prompt-protocol identities differ")
             if record not in summary["episodes"]:
                 parser.error("episode record differs from summary")
-            inspect(root, name, args.samples, args.chars, max_tokens=cap)
+            inspect(root, name, args.samples, args.chars, max_tokens=cap, get_samples=args.get_samples)
 
 
 if __name__ == "__main__":

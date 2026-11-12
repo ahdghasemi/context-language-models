@@ -5,8 +5,10 @@ Unity: the development task again scored 23/24, but all three additional CLM
 tasks scored zero. The two-update memory probe passed with 5.04 GiB headroom;
 the behavior gate failed. The saved-response inspection found non-tool command
 text in the three failed CLM cases and truncation in the inspected append-only
-case. The next bounded step is [tool-call guidance only](docs/TOOL_FORMAT_SCREEN.md),
-four episodes with the same output cap. Earlier scores and gates remain unchanged.
+case. The subsequent [tool-call guidance screen](docs/TOOL_FORMAT_SCREEN.md)
+completed four episodes with the same cap: CLM R130/1102 reached 23/24, while
+R1000/1101 and both append-only episodes remained at zero. Inspect the saved GET
+transition before another GPU run. Earlier scores and gates remain unchanged.
 
 The user-submitted `baseline-003` completed all nine Slurm stages, including real-model
 evaluation and GPU profiling. **Its capability gate failed: all four CLM and four

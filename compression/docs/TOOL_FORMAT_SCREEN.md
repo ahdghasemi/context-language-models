@@ -1,5 +1,75 @@
 # Native tool-call guidance after failed validation
 
+## Observed Unity result
+
+The user supplied the completed scheduler states and `protocol-report.json` for
+`tool-format-qwen3-4b-001`, run at
+`6b9e8b2b1e791bcba3003cdfb27f86718b31a66a`. All three stages exited successfully;
+the report is complete, export verified, and has no infrastructure errors, but
+`passed=false` and `can_advance_to_compression=false`. The report's manifest hash
+is `dca40897bab983682603a2d75f79ed90906d181284de337c86f3f4391d0d2533`.
+These are user-supplied observations, not jobs executed or artifacts accessed
+directly by this assistant.
+
+| Mode / task | Answer-only control correct / 24 | Added tool guidance correct / 24 | Model / parsed-tool calls | Operations delivered | Episode seconds |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| CLM R1000/1101 | 0 | 0 | 121 / 10 | 11 / 34 | 854.009 |
+| CLM R130/1102 | 0 | 23 | 55 / 55 | 26 / 26 | 270.550 |
+| Append-only R1000/1101 | 0 | 0 | 128 / 0 | 1 / 34 | 198.814 |
+| Append-only R130/1102 | 0 | 0 | 128 / 0 | 1 / 26 | 184.892 |
+
+The R130 result supports a prompt-interface contribution on this development
+case. It does not establish a reliable backbone across tasks. The R1000 agent now
+produces parsed calls and receives more operations, but still answers none
+correctly. Its completion tokens rose from 1,857 in the historical control to
+26,913, with 2,510,769 prompt tokens in the new episode. More activity is not task
+success or an efficiency improvement. The reported 10 parsed calls alone do not
+certify their exit status; inspect saved tool results and usage.
+
+The two CLM rewards average 23/48 = 0.479167. The complete failure on R1000 is
+scientifically material even apart from the provisional 0.5 screen threshold.
+Both append-only episodes still produced zero parsed calls and 1,786 completion
+tokens. Matching previous totals suggests a recurring failure pattern, but does
+not establish truncation in these new runs without inspecting their request logs.
+R1000's termination code and growing context likewise do not locate the initial
+failure; read the recorded termination reason and GET transition before assigning
+a cause.
+
+These are four development episodes with historical controls, not independent
+replications of a general improvement. In particular, do not combine the earlier
+R130/1101 result under the answer-only reminder with R130/1102 under the new
+reminder and label both a common-protocol baseline. No compressed model was
+trained or evaluated here. The original scores, provisional thresholds, and
+compression gate remain unchanged.
+
+### Next step: inspect saved responses, with no GPU submission
+
+The read-only inspector now includes the last parsed call and the first transition
+to a reply without a parsed call in its server-request samples. `--get-samples`
+also shows the earliest distinct retained responses following the first observed
+delivered GET header, even when that occurs after many ingestion calls. It reads
+neither gold answers nor a live task environment. Context edits can alter retained
+messages, so those excerpts are explicitly not aligned to server request numbers
+and are not proof of command execution.
+
+After checking out this diagnostic update, run with system Python:
+
+```bash
+python3 compression/inspect_contextbench.py \
+  --campaign /work/pi_aghasemi_umass_edu/tiny_clm_work/campaigns/tool-format-qwen3-4b-001 \
+  --episode clm--kv-store-R1000-seed1101 \
+  --episode append_only--kv-store-R1000-seed1101 \
+  --episode append_only--kv-store-R130-seed1102 \
+  --samples 2 --get-samples 3 --chars 1600
+```
+
+This should distinguish an unexecuted first GET, a failing retrieval command,
+truncation, and a later context-budget failure without another inference run.
+Any subsequent intervention needs a separate declared comparison. A wider output
+cap is justified as a control only where truncation is observed. A narrowed R130
+study would require an explicitly revised scope and a new baseline under one
+frozen protocol, rather than silently dropping failed R1000 configurations.
+
 ## What the saved traces establish
 
 The user ran the read-only inspector at `4c15f23384cb107962fff94e87f01505127b0167`
@@ -152,11 +222,13 @@ episodes require a new campaign name; this diagnostic does not resume them.
 
 ## Verification boundary
 
-The local CPU suite passed 191 tests, with one installed-SDK test skipped because
+The local CPU suite passed 194 tests, with one installed-SDK test skipped because
 that optional SDK stack is unavailable locally. Local tests verify exact
 preservation of answer-format-v1, one-time delegation,
 native-example parsing, rejection of the observed non-call forms, unchanged
 decoding/task settings, source mutation detection, distinct protocol identities,
 gate isolation, and the dependency-aware dry-run/submission path. No parser or
-upstream execution loop was changed. GPU behavior under the new reminder remains
-untested until the user runs this campaign on Unity.
+upstream execution loop was changed. The subsequent Unity outcome is recorded at
+the top of this document; successful job execution did not imply a passing
+capability screen. New read-only transition diagnostics are tested locally;
+their output on this campaign remains to be inspected.
