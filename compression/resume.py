@@ -8,6 +8,7 @@ import shlex
 import subprocess
 
 from submit import resource_args
+from tiny_clm.slurm import submission_environment
 
 
 def main():
@@ -57,11 +58,13 @@ def main():
         if dependency:
             cmd += ["--dependency=aftercorr:"+submitted[dependency]]
         if stage == "train":
+            cmd = [x for x in cmd if not x.startswith("--export=")]
             cmd += ["--export=ALL,TINY_CLM_RESUME=1"]
         cmd += [str(Path(spec["snapshot"])/"compression/slurm/job.sbatch"), str(manifest), stage]
         print(shlex.join(cmd))
         if a.submit:
-            jid = subprocess.check_output(cmd, text=True).strip().split(";", 1)[0]
+            jid = subprocess.check_output(cmd, text=True,
+                                          env=submission_environment()).strip().split(";", 1)[0]
             if not jid.isdigit():
                 raise RuntimeError("invalid Slurm job ID: "+jid)
             submitted[stage] = jid

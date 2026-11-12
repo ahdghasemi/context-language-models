@@ -8,6 +8,7 @@ import subprocess
 
 from submit import read, resource_args, write
 from tiny_clm.io import digest
+from tiny_clm.slurm import submission_environment
 
 p = argparse.ArgumentParser()
 p.add_argument("--manifest", required=True)
@@ -41,7 +42,8 @@ for stage, gpu, dependency in [("prepare", False, None), ("evaluate", True, "aft
         if gpu and not os.environ.get("TINY_CLM_GPU_CONSTRAINT"):
             raise ValueError("configure GPU constraint before submission")
         root.mkdir(exist_ok=True)
-        jid = subprocess.check_output(command, text=True).strip().split(";", 1)[0]
+        jid = subprocess.check_output(command, text=True,
+                                      env=submission_environment()).strip().split(";", 1)[0]
         if not jid.isdigit():
             raise RuntimeError("invalid Slurm job ID: "+jid)
         jobs[stage] = jid

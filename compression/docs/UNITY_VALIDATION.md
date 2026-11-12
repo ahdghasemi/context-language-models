@@ -115,6 +115,56 @@ and diff whitespace checks passed. No full ML suite, Apptainer build, Harbor run
 or Unity submission was executed by the assistant for this revision. A user retry must
 finish both build and runtime preflight before reporting container preparation success.
 
-Real-model/data preparation completion has not yet been shown in the user's output.
-Constrained training on the real checkpoint, baseline CLM competence, production GPU
-profiling, and complete Slurm campaigns remain unverified.
+## Subsequent Unity preparation and baseline submission
+
+User output at `3c1195158bd00f3100c7fbd5742b94a38d11e372` confirms the complete image
+build, `%test` (GLIBC 2.41, Python 3.13.15), and runtime preflight passed. Four runnable
+tasks were packaged: kv-store R130/R1000, each with seeds 1101 and 1102.
+The resulting SIF SHA-256 is
+`382f831f3ec30ac7c893960dfbd855d6f87e7df219c51fa9a91d23cdb7e5a9cd`.
+The separate baseline-input check verified the task/image/recipe hashes and model/data
+hashes. Model: `Qwen/Qwen3-0.6B` at
+`c1899de289a04d12100db370d81485cdf75e47ca`; dataset: `Salesforce/wikitext` at
+`b08601e04326c79dfdd32d625aee71d232d685c3`. These checks did not evaluate model quality.
+
+Scheduler queries showed account `pi_aghasemi_umass_edu`, allowed QoS
+`long,normal,short`, short limit four hours, long limit five days, and five-day limits
+on both `cpu` and `gpu-highvram`. These are observations, not permanent cluster policy.
+The user submitted `baseline-001` from a GPU VS Code allocation, using the above source
+commit, one GPU/four CPUs/32 GB for GPU stages and two CPUs/8 GB for the small CPU stages.
+
+| Stage | Job | Observed outcome |
+| --- | --- | --- |
+| Environment | 1467312 | Completed, exit 0:0, 24 seconds, uri-gpu001 |
+| Correctness | 1467313 | Failed, exit 1:0, 2 seconds, uri-cpu074 |
+| Smoke | 1467314 | Cancelled before execution |
+| Original checkpoint / export / evaluate / profile / ContextBench | 1467315–1467319 | Cancelled before execution |
+| Aggregate | 1467320 | Failed, exit 1:0, 1 second, uri-cpu074 |
+
+Both failing stderr logs contain only the srun step-creation error
+`Invalid generic resource (gres) specification`; their stdout is empty. Thus neither
+correctness Python code nor aggregation ran. The model stages were dependency-cancelled.
+This is infrastructure failure, not failed ML correctness or poor model quality.
+
+The scripts previously exported the parent allocation's environment and left srun GPU
+resource options implicit. Slurm documents `SLURM_GPUS`, `SLURM_GPUS_PER_NODE`,
+`SLURM_GRES`, `SLURM_STEP_GRES`, `SLURM_TRES_PER_TASK` and related variables as input
+options. Inheritance from the GPU submitting session is the working diagnosis; the
+exact offending variable was not logged, so it is not claimed as directly observed.
+
+The repair filters parent allocation/option variables at all sbatch submission sites,
+preserves Slurm client connection settings and project paths, and makes CPU/GPU step
+requests explicit. Step filtering preserves the NEW allocation's IDs and device mask.
+The manifest records the names removed at submission. `baseline-001` and its immutable
+snapshot remain unchanged; validation must use a new campaign and code snapshot.
+
+Local validation: seven stdlib environment tests passed, including actual subprocess
+boundaries and an executable stand-in for srun covering CPU and GPU requests. Those
+tests do not invoke a Slurm scheduler. The combined targeted pytest run passed **14
+tests**, with **2 deselected** because their aggregation paths import unavailable
+PyTorch. It includes real git snapshot creation with mocked sbatch, dependency checks,
+and a mocked five-stage resume checking environment filtering and its resume flag.
+Both batch scripts passed shell syntax checks; Python compilation and diff whitespace
+checks passed. The full ML suite and repaired Unity submission remain unrun
+by the assistant. Constrained training on the real checkpoint, baseline CLM competence,
+GPU profiling, and a complete Slurm campaign remain unverified.

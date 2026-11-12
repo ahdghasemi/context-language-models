@@ -121,12 +121,19 @@ def test_real_git_snapshot_then_mock_scheduler_dependencies(tmp_path, monkeypatc
     monkeypatch.setenv("TINY_CLM_VENV", str(venv))
     monkeypatch.setenv("TINY_CLM_SNAPSHOTS", str(tmp_path/"snapshots"))
     monkeypatch.setenv("TINY_CLM_GPU_CONSTRAINT", "test-fixture-not-a-cluster-setting")
+    monkeypatch.setenv("SLURM_JOB_ID", "parent-job")
+    monkeypatch.setenv("SLURM_GPUS_PER_NODE", "a100:1")
+    monkeypatch.setenv("SBATCH_GRES", "gpu:a100:1")
     config = ROOT/"configs/pilot.json"
     original = subprocess.check_output
     calls = []
 
     def mocked_submit(command, **kw):
         if command[0] == "sbatch":
+            assert "--export=ALL" in command
+            assert not any(k in kw["env"] for k in
+                           ("SLURM_JOB_ID", "SLURM_GPUS_PER_NODE", "SBATCH_GRES"))
+            assert kw["env"]["TINY_CLM_VENV"] == str(venv)
             calls.append(command)
             return str(100+len(calls))+"\n"
         return original(command, **kw)
@@ -136,5 +143,42 @@ def test_real_git_snapshot_then_mock_scheduler_dependencies(tmp_path, monkeypatc
     submit.main(["correctness", "--config", str(config), "--campaign", str(campaign), "--submit"])
     manifest = json.loads((campaign/"manifest.json").read_text())
     verify_snapshot(manifest["snapshot"], manifest["snapshot_hash"])
+    assert "SLURM_GPUS_PER_NODE" in manifest["submission_environment_removed"]
     assert len(calls) == 2 and "--dependency=afterok:101" in calls[1]
     assert json.loads((campaign/"jobs.json").read_text()) == {"correctness": "101", "smoke": "102"}
+
+
+def test_resume_filters_parent_resources_and_keeps_resume_export(tmp_path, monkeypatch):
+    import subprocess
+    monkeypatch.syspath_prepend(str(ROOT))
+    resume = load_script("resume")
+    run = tmp_path/"runs"/"fixture"
+    run.mkdir(parents=True)
+    (run/"status.json").write_text(json.dumps({"status": "incomplete"}))
+    (run/"latest.pt").touch()
+    manifest = tmp_path/"manifest.json"
+    manifest.write_text(json.dumps({"campaign": str(tmp_path), "snapshot": "/snapshot",
+                                    "rows": [{"run_id": "fixture"}]}))
+    (tmp_path/"jobs.json").write_text(json.dumps({"train": "100"}))
+    monkeypatch.setenv("USER", "fixture")
+    monkeypatch.setenv("SLURM_GPUS_PER_NODE", "a100:1")
+    monkeypatch.setenv("TINY_CLM_GPUS", "1")
+    calls = []
+
+    def scheduler(command, **kwargs):
+        if command[0] == "squeue":
+            return ""
+        assert command[0] == "sbatch"
+        assert "SLURM_GPUS_PER_NODE" not in kwargs["env"]
+        calls.append(command)
+        return str(200+len(calls))+"\n"
+
+    monkeypatch.setattr(subprocess, "check_output", scheduler)
+    monkeypatch.setattr("sys.argv", ["resume.py", "--manifest", str(manifest),
+                                    "--indices", "0", "--from-stage", "train", "--submit"])
+    resume.main()
+    assert len(calls) == 5
+    assert [x for x in calls[0] if x.startswith("--export=")] == ["--export=ALL,TINY_CLM_RESUME=1"]
+    assert all([x for x in cmd if x.startswith("--export=")] == ["--export=ALL"]
+               for cmd in calls[1:])
+    assert "--dependency=aftercorr:201" in calls[1]

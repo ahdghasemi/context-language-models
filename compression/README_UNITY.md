@@ -1,10 +1,12 @@
 # Unity / Slurm operating instructions
 
-This workflow is implemented but **has not been submitted on Unity**. CPU tests were
-executed elsewhere. `gpu`, `gpu-preempt`, `cpu` partition terminology and
+This workflow is implemented. The first user-submitted baseline campaign failed at
+CPU job-step launch; its downstream model jobs were cancelled. Baseline quality and
+compression results on Unity remain unmeasured. `gpu`, `gpu-preempt`, `cpu` partition terminology and
 `module load apptainer/latest` were checked against official Unity documentation on
-2026-11-11. Your account association, permitted QoS, available GPU feature names,
-driver compatibility, quotas and fakeroot/Singularity runtime remain unverified.
+2026-11-11. User output subsequently verified account `pi_aghasemi_umass_edu`, allowed
+QoS `long,normal,short`, `a100-80g`, driver compatibility on an A100, and the task
+container build/runtime. Current quotas and resource availability still depend on Unity.
 No account, QoS or GPU type is invented or silently selected.
 
 Update from user-supplied Unity terminal output: the environment check, all 43 tests,
@@ -13,8 +15,10 @@ container builds failed on inherited /nas and /work binds. Clearing the inherite
 bind/mount variables passed its two new tests on Unity and allowed `%post` to start.
 That exposed an independent host fakeroot GLIBC incompatibility. The task base is now
 digest-pinned to Python 3.13.15 on Debian trixie; see the diagnosis below.
-A successful rebuilt container, CLM episodes, and the dependency-driven
-Slurm campaigns are still unverified. See [Unity validation](docs/UNITY_VALIDATION.md).
+The rebuilt container and all four task packages passed on Unity. Model/data hashes
+also passed verification. The first baseline environment job passed, but CPU steps
+failed with an invalid GRES request; see the launch fix below. CLM episodes and complete
+campaigns are still unverified. See [Unity validation](docs/UNITY_VALIDATION.md).
 
 Official references:
 [sbatch](https://docs.unity.rc.umass.edu/documentation/jobs/sbatch/),
@@ -415,3 +419,43 @@ the same resulting image and lock for all dense/compressed and CLM/append-only c
 Do not combine results produced using different image hashes. The task definitions,
 graders and Python version remain fixed, but equivalent task behavior still requires
 the baseline episode checks. A successful image build alone does not establish it.
+
+## CPU jobs fail before Python: invalid GRES specification
+
+In `baseline-001`, jobs 1467313 (correctness) and 1467320 (aggregate) were allocated
+two CPUs and 8 GB on uri-cpu074 but `srun` failed to create their steps with
+`Invalid generic resource (gres) specification`. The GPU environment job 1467312
+passed. No test failure, model execution or compression result follows from this
+launcher error. The exact inherited variable was not captured in those failed jobs;
+GPU/GRES option inheritance from the submitting GPU VS Code session is the working
+diagnosis, supported by Slurm's documented environment-to-option mapping.
+
+All three submission drivers now pass a filtered child environment to `sbatch`:
+parent allocation variables (`SLURM_*`, `SLURMD_*`), scheduler option overrides
+(`SBATCH_*`, `SRUN_*`, `SALLOC_*`) and parent GPU visibility masks are excluded.
+`SLURM_CONF` and `SLURM_CONF_SERVER` are retained for client connectivity. Project,
+module, Python, cache and temporary paths remain. The calling terminal is untouched.
+Resource requests must be set using `TINY_CLM_*` configuration; arbitrary inherited
+SBATCH/SRUN settings are intentionally not an alternative configuration interface.
+`--export=ALL` exports this filtered environment, and Slurm supplies the new allocation.
+The campaign manifest records removed variable names, never their values.
+
+Inside the new allocation, `tiny_clm.slurm` retains its actual job/array IDs and device
+visibility while removing GPU/GRES/TRES option overrides. It then replaces itself with
+`srun`: CPU stages explicitly use `--gres=none`; GPU stages use `--gpus=1`. Both use
+one task and the allocated CPU count. This also applies to final-test job steps;
+resume and final-test submission drivers use the same submission filter. Signal
+forwarding still goes through srun. Do not use the submission filter inside an already
+running allocation, where clearing its job identity would be incorrect.
+
+Keep `baseline-001`, its logs and its immutable snapshot as failure evidence. Fetch
+the new revision and submit a new `baseline-002`; no training checkpoint exists to
+resume in the failed campaign. Do not edit the old snapshot, requeue its failed jobs,
+rebuild the working container, or redownload verified assets for this launcher repair.
+Use the previous baseline resources (`long`, one A100-80GB, four CPUs, 32 GB, one-hour
+short GPU stages and six-hour ContextBench stage). The new campaign repeats correctness
+before releasing any model work. Its actual Slurm result still needs validation.
+
+Primary references:
+https://slurm.schedmd.com/srun.html (GPU/GRES environment options and `--gres=none`),
+https://slurm.schedmd.com/sbatch.html (export and input/output environment).

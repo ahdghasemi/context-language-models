@@ -19,4 +19,11 @@ mkdir -p "$TMPDIR"
 export APPTAINER_TMPDIR="$TMPDIR" SINGULARITY_TMPDIR="$TMPDIR"
 trap 'rm -rf -- "$TMPDIR"' EXIT
 cd "$SNAPSHOT"
-srun "$TINY_CLM_VENV/bin/python" "$SNAPSHOT/compression/final_test.py" --manifest "$MANIFEST" --selection "$SELECTION" --stage "$STAGE"
+case "$STAGE" in
+  prepare|aggregate) STEP_RESOURCE=--cpu ;;
+  evaluate) STEP_RESOURCE=--gpu ;;
+  *) echo "Unknown final-test stage: $STAGE" >&2; exit 2 ;;
+esac
+"$TINY_CLM_VENV/bin/python" -m tiny_clm.slurm "$STEP_RESOURCE" -- \
+  "$TINY_CLM_VENV/bin/python" "$SNAPSHOT/compression/final_test.py" \
+  --manifest "$MANIFEST" --selection "$SELECTION" --stage "$STAGE"

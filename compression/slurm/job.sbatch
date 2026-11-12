@@ -28,4 +28,10 @@ mkdir -p "${TMPDIR:?}"
 export TMPDIR=$(mktemp -d "$TMPDIR/tclm-${SLURM_JOB_ID:-local}-XXXXXX")
 export APPTAINER_TMPDIR="$TMPDIR" SINGULARITY_TMPDIR="$TMPDIR"
 trap 'rm -rf -- "$TMPDIR"' EXIT
-srun --kill-on-bad-exit=1 "$TINY_CLM_VENV/bin/python" "$SNAPSHOT/compression/run_stage.py" "$MANIFEST" "$STAGE"
+case "$STAGE" in
+  correctness|smoke|prepare|aggregate) STEP_RESOURCE=--cpu ;;
+  environment|train|export|evaluate|profile|contextbench) STEP_RESOURCE=--gpu ;;
+  *) echo "Unknown stage: $STAGE" >&2; exit 2 ;;
+esac
+"$TINY_CLM_VENV/bin/python" -m tiny_clm.slurm "$STEP_RESOURCE" -- \
+  "$TINY_CLM_VENV/bin/python" "$SNAPSHOT/compression/run_stage.py" "$MANIFEST" "$STAGE"

@@ -18,6 +18,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/"clm"))
 from tiny_clm.provenance import require_gate, snapshot_files, verify_snapshot  # noqa: E402
+from tiny_clm.slurm import submission_environment  # noqa: E402
 
 
 def read(path):
@@ -70,7 +71,8 @@ def grid(config, stage):
 
 
 def resource_args(gpu, stage):
-    args = ["--nodes=1", "--ntasks=1", "--kill-on-invalid-dep=yes", "--signal=USR1@180"]
+    args = ["--nodes=1", "--ntasks=1", "--export=ALL",
+            "--kill-on-invalid-dep=yes", "--signal=USR1@180"]
     small = stage in {"correctness", "smoke", "aggregate"}
     defaults = {"CPUS": "2" if small else os.environ.get("TINY_CLM_CPUS", "8"),
                 "MEM": "8G" if small else os.environ.get("TINY_CLM_MEM", "64G"),
@@ -204,6 +206,8 @@ def main(argv=None):
     spec["snapshot"] = str(snap)
     spec["snapshot_hash"] = verify_snapshot(snap)
     spec["environment"] = read(venv/"READY.json")
+    batch_env = submission_environment()
+    spec["submission_environment_removed"] = sorted(set(os.environ)-set(batch_env))
     for row in rows:
         target = campaign/"configs"/(row["run_id"]+".json")
         write(target, row["config"])
@@ -216,7 +220,7 @@ def main(argv=None):
         if job["dependencies"]:
             command += ["--dependency="+",".join(f"{kind}:{ids[name]}" for kind, name in job["dependencies"])]
         command += [str(snap/"compression/slurm/job.sbatch"), str(campaign/"manifest.json"), job["name"]]
-        jid = subprocess.check_output(command, text=True).strip().split(";", 1)[0]
+        jid = subprocess.check_output(command, text=True, env=batch_env).strip().split(";", 1)[0]
         if not jid.isdigit():
             raise RuntimeError(f"unexpected sbatch job ID: {jid}")
         ids[job["name"]] = jid
