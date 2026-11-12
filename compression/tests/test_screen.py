@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from tiny_clm.provenance import canonical_hash, require_gate, select_task_records, verify_snapshot
+from tiny_clm.provenance import canonical_hash, require_gate, select_task_records, verify_snapshot, INFERENCE_RUNTIME
 from tiny_clm.screen_contract import qwen3_counts, screen_report, validate_screen
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,13 +21,14 @@ def fixture():
             "revision": config["contextbench"]["revision"], "image_sha256": "image",
             "tasks": [{"path": "/task/kv-store-R1000-seed1101", "sha256": "unselected"},
                       {"path": "/task/kv-store-R130-seed1101", "sha256": "selected"}]}
-    audit = {"reload_passed": True, "model": config["model"], "weight_sha256": "weights"}
+    audit = {"reload_passed": True, "cache_passed": True, "inference_runtime": INFERENCE_RUNTIME,
+             "model": config["model"], "weight_sha256": "weights"}
     episodes = [{"mode": m, "episode": config["screen"]["task_names"][0],
                  "status": "complete", "error": None, "returncode": 0,
                  "rewards": {"grader_valid": 1, "reward": 0.0}, "weight_sha256": "weights",
-                 "task_sha256": "selected", "request_hash": lock["request_hash"]}
+                 "task_sha256": "selected", "request_hash": lock["request_hash"], "inference_runtime": INFERENCE_RUNTIME}
                 for m in config["contextbench"]["modes"]]
-    summary = {"all_complete": True, "contextbench": config["contextbench"],
+    summary = {"all_complete": True, "inference_runtime": INFERENCE_RUNTIME, "contextbench": config["contextbench"],
                "screen_task_names": config["screen"]["task_names"], "container_sha256": "image",
                "source_revision": lock["revision"], "episodes": episodes}
     return config, reference, lock, audit, summary
@@ -74,7 +75,7 @@ def test_passing_screen_cannot_authorize_compression():
             require_gate(report, ref["config"], kind)
 
 
-@pytest.mark.parametrize("mutation", ["missing", "duplicate", "weight", "task", "request", "nan", "failed", "container"])
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "weight", "task", "request", "nan", "failed", "container", "runtime", "cache"])
 def test_partial_or_mixed_evidence_cannot_pass(mutation):
     cfg, _, lock, audit, summary = fixture()
     summary["episodes"][0]["rewards"]["reward"] = 1.0
@@ -89,6 +90,10 @@ def test_partial_or_mixed_evidence_cannot_pass(mutation):
         ep["rewards"]["reward"] = float("nan")
     elif mutation == "failed":
         ep["returncode"] = 1
+    elif mutation == "runtime":
+        ep["inference_runtime"] = "legacy"
+    elif mutation == "cache":
+        audit["cache_passed"] = False
     else:
         summary["container_sha256"] = "changed"
     report = screen_report(cfg, lock, audit, summary)

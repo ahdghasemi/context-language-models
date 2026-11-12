@@ -16,6 +16,7 @@ import torch
 
 from .io import digest, seed_all
 from .model import load_export, tokenizer_from
+from .provenance import LEGACY_INFERENCE_RUNTIME
 
 
 def parse_response(text):
@@ -133,7 +134,8 @@ def create_app(engine):
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "weight_sha256": engine.spec["weight_sha256"]}
+        return {"status": "ok", "weight_sha256": engine.spec["weight_sha256"],
+                "inference_runtime": engine.spec.get("inference_runtime", LEGACY_INFERENCE_RUNTIME)}
 
     @app.get("/v1/models")
     def models():

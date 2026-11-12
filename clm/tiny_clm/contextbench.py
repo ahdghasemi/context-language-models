@@ -14,7 +14,7 @@ import urllib.request
 
 from .io import digest, exclusive, file_sha, metadata, read_json, write_json
 from .container import container_environment
-from .provenance import select_task_records
+from .provenance import select_task_records, LEGACY_INFERENCE_RUNTIME
 
 
 def tree_hash(root):
@@ -134,7 +134,7 @@ def prepare(config, source, destination, recipe, *, skip_container=False):
         return manifest
 
 
-def wait_server(process, url, expected_sha, deadline=180):
+def wait_server(process, url, expected_sha, deadline=180, expected_runtime=None):
     end = time.monotonic()+deadline
     while time.monotonic() < end:
         if process.poll() is not None:
@@ -144,6 +144,8 @@ def wait_server(process, url, expected_sha, deadline=180):
                 health = json.load(response)
             if health.get("weight_sha256") != expected_sha:
                 raise RuntimeError("port belongs to a different model server")
+            if expected_runtime is not None and health.get("inference_runtime") != expected_runtime:
+                raise RuntimeError("server uses a different inference precision policy")
             return
         except OSError:
             time.sleep(.2)
@@ -159,6 +161,7 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
     if not shutil.which("singularity"):
         raise RuntimeError("Harbor needs the singularity compatibility executable from Apptainer")
     spec = read_json(Path(artifact)/"compression.json")
+    runtime = spec.get("inference_runtime", LEGACY_INFERENCE_RUNTIME)
     env = dict(container_environment(), OPENAI_API_KEY="EMPTY",
                LITELLM_LOCAL_MODEL_COST_MAP="True", NO_PROXY="*", no_proxy="*",
                TIKTOKEN_CACHE_DIR=lock["budget_tokenizer_cache"]["path"],
@@ -185,7 +188,8 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
             record_path = out/(name+".json")
             if record_path.exists():
                 record = read_json(record_path)
-                if record["weight_sha256"] != spec["weight_sha256"] or record["request_hash"] != digest(cb):
+                if (record["weight_sha256"] != spec["weight_sha256"] or record["request_hash"] != digest(cb) or
+                        record.get("inference_runtime", LEGACY_INFERENCE_RUNTIME) != runtime):
                     raise ValueError("existing episode belongs to another experiment")
                 episodes.append(record)
                 continue
@@ -204,7 +208,8 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
                     "--log", str(usage_path), "--seed", str(10000+ti)], stdout=logfile, stderr=subprocess.STDOUT, env=env)
                 start = time.perf_counter()
                 try:
-                    wait_server(server, api, spec["weight_sha256"], deadline=server_timeout)
+                    wait_server(server, api, spec["weight_sha256"], deadline=server_timeout,
+                                expected_runtime=runtime)
                     kwargs = {"api_base": api+"/v1", "context_budget_tokens": cb["budget"],
                         "context_budget_reserve_tokens": cb["reserve"], "max_tokens": cb["max_tokens"],
                         "temperature": cb["temperature"], "top_p": cb["top_p"], "max_steps": cb["max_steps"]}
@@ -238,14 +243,16 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
                         "completion_tokens": sum(r["completion_tokens"] for r in requests),
                         "tool_calls": sum(r["tool_calls"] for r in requests), "model_calls": len(requests),
                         "context_lengths": [r["prompt_tokens"] for r in requests],
-                        "weight_sha256": spec["weight_sha256"], "task_sha256": task["sha256"]}
+                        "weight_sha256": spec["weight_sha256"], "task_sha256": task["sha256"],
+                        "inference_runtime": runtime}
                     write_json(record_path, record)
                     episodes.append(record)
                 except Exception as exc:
                     record = {"episode": path.name, "mode": mode, "status": "failed", "rewards": {},
                               "error": {"type": type(exc).__name__, "message": str(exc)},
                               "request_hash": digest(cb), "weight_sha256": spec["weight_sha256"],
-                              "task_sha256": task["sha256"], "elapsed_seconds": time.perf_counter()-start}
+                              "task_sha256": task["sha256"], "elapsed_seconds": time.perf_counter()-start,
+                              "inference_runtime": runtime}
                     write_json(record_path, record)
                     episodes.append(record)
                 finally:
@@ -256,6 +263,7 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
                         server.kill()
                         server.wait()
     result = {"episodes": episodes, "metadata": metadata(), "contextbench": cb,
+              "inference_runtime": runtime,
               "container_sha256": lock["image_sha256"], "source_revision": lock["revision"],
               "all_complete": all(r["status"] == "complete" for r in episodes),
               "scope": "original CLM harness and ContextBench append-only agent; substituted Qwen3 backbone and stated decoding"}

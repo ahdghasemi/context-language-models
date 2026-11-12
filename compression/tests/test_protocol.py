@@ -39,6 +39,8 @@ def test_reference_http_server_preserves_tools_and_usage(tmp_path):
     export_model(model, tmp_path/"export", ranks, tokenizer=tokenizer_from(cfg["assets"]["model_path"]), dtype="float32")
     client = TestClient(create_app(Engine(tmp_path/"export")))
     assert client.get("/health").status_code == 200
+    from tiny_clm.provenance import INFERENCE_RUNTIME
+    assert client.get("/health").json()["inference_runtime"] == INFERENCE_RUNTIME
     request = {"model":"tiny-clm", "messages":[{"role":"user","content":"w4 w5"}], "max_tokens":2,"temperature":0}
     response = client.post("/v1/chat/completions", json=request)
     assert response.status_code == 200

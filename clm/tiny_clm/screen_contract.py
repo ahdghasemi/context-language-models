@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from .provenance import canonical_hash, select_task_records
+from .provenance import canonical_hash, select_task_records, INFERENCE_RUNTIME
 
 
 def validate_screen(config, reference, lock):
@@ -50,11 +50,13 @@ def screen_report(config, lock, audit, summary):
     expected = {(m, Path(t["path"]).name): t["sha256"]
                 for m in config["contextbench"]["modes"] for t in tasks}
     errors, records, seen = [], [], set()
-    if not audit or not audit.get("reload_passed") or audit.get("model") != config["model"]:
+    if (not audit or not audit.get("reload_passed") or not audit.get("cache_passed") or
+            audit.get("inference_runtime") != INFERENCE_RUNTIME or audit.get("model") != config["model"]):
         errors.append("missing or incompatible export audit")
     if (not summary or not summary.get("all_complete") or
             summary.get("contextbench") != config["contextbench"] or
             summary.get("screen_task_names") != config["screen"]["task_names"] or
+            summary.get("inference_runtime") != INFERENCE_RUNTIME or
             summary.get("container_sha256") != lock["image_sha256"] or
             summary.get("source_revision") != lock["revision"]):
         errors.append("missing, incomplete, or incompatible ContextBench summary")
@@ -66,6 +68,7 @@ def screen_report(config, lock, audit, summary):
         if (key not in expected or key in seen or ep.get("status") != "complete" or ep.get("error") or
                 ep.get("returncode") != 0 or rewards.get("grader_valid") != 1 or not valid or
                 ep.get("weight_sha256") != (audit or {}).get("weight_sha256") or
+                ep.get("inference_runtime") != INFERENCE_RUNTIME or
                 ep.get("task_sha256") != expected.get(key) or
                 ep.get("request_hash") != canonical_hash(config["contextbench"])):
             errors.append("invalid episode: " + repr(key))
@@ -76,7 +79,8 @@ def screen_report(config, lock, audit, summary):
         errors.append("episode coverage differs from the declared screen subset")
     complete = not errors
     clm = [e["rewards"]["reward"] for e in records if e["mode"] == "clm"] if complete else []
-    return {"gate_type": "backbone_screen", "passed": complete and bool(clm) and
+    return {"gate_type": "backbone_screen", "inference_runtime": INFERENCE_RUNTIME,
+            "passed": complete and bool(clm) and
                 min(clm) >= config["screen"]["min_clm_reward"],
             "complete": complete, "errors": errors, "episodes": records,
             "model": config["model"], "can_advance_to_compression": False,

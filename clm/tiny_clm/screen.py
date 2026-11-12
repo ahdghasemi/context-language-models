@@ -11,7 +11,7 @@ import sys
 import time
 
 from .io import exclusive, file_sha, memory, metadata, read_json, seed_all, write_json
-from .provenance import verify_snapshot
+from .provenance import verify_snapshot, INFERENCE_RUNTIME
 from .screen_contract import qwen3_counts, screen_report, validate_screen
 
 
@@ -80,7 +80,7 @@ def model_lock(spec):
 
 def export(spec):
     import torch
-    from .model import dense_model, export_model, load_export, tokenizer_from
+    from .model import dense_model, export_model, load_export, tokenizer_from, inference_state
     from .lowrank import accounting
 
     if (torch.cuda.device_count() != 1 or not torch.cuda.is_bf16_supported() or
@@ -107,6 +107,7 @@ def export(spec):
     ids = tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
     with torch.inference_mode():
         before = model(input_ids=ids, use_cache=False).logits[:, -1].float().cpu()
+    source_state = inference_state(model)
     info = export_model(model, campaign/"export", {}, tokenizer=tokenizer, dtype="bfloat16",
                provenance={"model": spec["config"]["model"], "screen_only": True,
                            "commit": spec["commit"], "model_lock_sha256": file_sha(
@@ -117,6 +118,35 @@ def export(spec):
     reloaded, _ = load_export(campaign/"export", device="cuda")
     with torch.inference_mode():
         after = reloaded(input_ids=ids, use_cache=False).logits[:, -1].float().cpu()
+    reloaded_state = inference_state(reloaded)
+    # Controlled diagnostic only: change the tiny buffer, then restore it before
+    # any cache/generation/benchmark call. This does not alter deployed weights.
+    rotary = reloaded.model.rotary_emb
+    original_frequency = rotary.inv_freq
+    try:
+        rotary.inv_freq = original_frequency.to(torch.bfloat16)
+        with torch.inference_mode():
+            legacy = reloaded(input_ids=ids, use_cache=False).logits[:, -1].float().cpu()
+    finally:
+        rotary.inv_freq = original_frequency
+    finite = bool(torch.isfinite(before).all() and torch.isfinite(after).all() and torch.isfinite(legacy).all())
+    audit = {"model": spec["config"]["model"], "inference_runtime": INFERENCE_RUNTIME,
+        "weight_sha256": info["weight_sha256"], "weight_bytes": info["weight_bytes"],
+        "source_state": source_state, "reloaded_state": reloaded_state,
+        "identical_parameters_and_buffers": source_state == reloaded_state,
+        "reload_passed": finite and source_state == reloaded_state and
+                         torch.allclose(after, before, rtol=1e-4, atol=1e-4),
+        "cache_passed": False, "reload_tolerance": {"rtol": 1e-4, "atol": 1e-4},
+        "reload_max_abs_error": (after-before).abs().max().item() if finite else None,
+        "legacy_buffer_cast_max_abs_logit_error": (legacy-before).abs().max().item() if finite else None,
+        "finite_logits": finite, "counts": counts, "whole_keep": 1.0, "metadata": metadata(),
+        "scope": "uncompressed BF16 loading/export/cache checks; no language or CLM quality claim"}
+    # Publish diagnostics before assertions so a failed export remains auditable.
+    write_json(campaign/"export-audit.json", audit)
+    if not finite:
+        raise ValueError("nonfinite export diagnostic logits; see export-audit.json")
+    if source_state != reloaded_state:
+        raise ValueError("save/reload changed parameter bytes or runtime buffers; see export-audit.json")
     torch.testing.assert_close(after, before, rtol=1e-4, atol=1e-4)
     # Cache compatibility test uses fixed tokens; it is not a quality measurement.
     with torch.inference_mode():
@@ -124,17 +154,14 @@ def export(spec):
         cached = reloaded(input_ids=ids[:, -1:], past_key_values=prefix.past_key_values,
                           use_cache=True).logits[:, -1].float().cpu()
     # BF16 SDPA may accumulate differently for a one-token cached query.
-    torch.testing.assert_close(cached, after, rtol=0.02, atol=0.25)
-    write_json(campaign/"export-audit.json", {
-        "model": spec["config"]["model"], "weight_sha256": info["weight_sha256"],
-        "weight_bytes": info["weight_bytes"], "reload_passed": True,
-        "reload_max_abs_error": (after-before).abs().max().item(),
-        "reload_tolerance": {"rtol": 1e-4, "atol": 1e-4},
-        "cache_max_abs_error": (cached-after).abs().max().item(),
+    cache_finite = bool(torch.isfinite(cached).all())
+    audit.update({"cache_passed": cache_finite and torch.allclose(cached, after, rtol=0.02, atol=0.25),
+        "cache_max_abs_error": (cached-after).abs().max().item() if cache_finite else None,
         "cache_tolerance": {"rtol": 0.02, "atol": 0.25},
         "template_tools_present": True, "counts": counts, "whole_keep": 1.0,
-        "elapsed_seconds": time.perf_counter()-start, "memory": memory(), "metadata": metadata(),
-        "scope": "uncompressed BF16 loading/export/cache checks; no language or CLM quality claim"})
+        "elapsed_seconds": time.perf_counter()-start, "memory": memory()})
+    write_json(campaign/"export-audit.json", audit)
+    torch.testing.assert_close(cached, after, rtol=0.02, atol=0.25)
     print("SCREEN_EXPORT_VERIFIED", flush=True)
 
 
@@ -173,7 +200,9 @@ def main():
     elif stage == "screen_contextbench":
         from .contextbench import run
         audit = read_json(campaign/"export-audit.json")
-        if not audit["reload_passed"] or file_sha(campaign/"export/model.safetensors") != audit["weight_sha256"]:
+        if (not audit["reload_passed"] or not audit["cache_passed"] or
+                audit["inference_runtime"] != INFERENCE_RUNTIME or
+                file_sha(campaign/"export/model.safetensors") != audit["weight_sha256"]):
             raise ValueError("export is not verified")
         run(campaign/"export", spec["config"], spec["contextbench_lock"], campaign/"contextbench",
             task_names=spec["config"]["screen"]["task_names"],

@@ -12,7 +12,8 @@ from transformers import AutoModelForCausalLM, AutoConfig, GenerationConfig
 from .data import load_blocks
 from .io import digest, memory, metadata, read_json, seed_all, write_json
 from .lowrank import replace
-from .model import DTYPES, export_model, load_export, tokenizer_from
+from .model import deployment_precision, export_model, load_export, tokenizer_from
+from .provenance import INFERENCE_RUNTIME, LEGACY_INFERENCE_RUNTIME
 from .train import nll
 
 
@@ -47,7 +48,7 @@ def export_run(run, device="cpu"):
     originals = ({name: model.get_submodule(name).weight.detach().cpu().clone() for name in ranks}
                  if ranks and not already_factorized else {})
     # Hold precision fixed on both sides of export; report rounding separately from training precision.
-    model.to(dtype=DTYPES[dtype])
+    deployment_precision(model, dtype)
     before = nll(model, val, cfg["training"]["validation_batches"])
     x = torch.tensor(val[:1].copy(), device=device, dtype=torch.long)
     old_logits = model(x, use_cache=False).logits.float().cpu()
@@ -56,11 +57,12 @@ def export_run(run, device="cpu"):
             layer = model.get_submodule(name)
             layer.weight = torch.nn.Parameter(weight.to(layer.weight.device), requires_grad=False)
         replace(model, ranks)
-        model.to(dtype=DTYPES[dtype])
+        deployment_precision(model, dtype)
     del originals
     after = nll(model, val, cfg["training"]["validation_batches"])
     new_logits = model(x, use_cache=False).logits.float().cpu()
     gap = {"before": before, "after": after, "nll_delta": after["nll"]-before["nll"],
+           "inference_runtime": INFERENCE_RUNTIME,
            "perplexity_ratio": math.exp(after["nll"]-before["nll"]), "dtype": dtype,
            "logit_rmse_first_block": (old_logits-new_logits).square().mean().sqrt().item(),
            "argmax_agreement_first_block": (old_logits.argmax(-1)==new_logits.argmax(-1)).float().mean().item(),
@@ -68,6 +70,8 @@ def export_run(run, device="cpu"):
     tok = tokenizer_from(cfg["assets"]["model_path"])
     if (root/"export").exists():
         report = read_json(root/"export/compression.json")
+        if report.get("inference_runtime") != INFERENCE_RUNTIME:
+            raise ValueError("existing export uses legacy precision; preserve it and use a new run")
         if digest(report["provenance"]["config"]) != digest(cfg) or report["ranks"] != ranks:
             raise ValueError("existing export belongs to a different configuration")
     else:
@@ -101,6 +105,7 @@ def evaluate(artifact, output, split="validation", final_selection=None, device=
     start = time.perf_counter()
     result = nll(model, data)
     result.update(split=split, artifact_sha256=spec["weight_sha256"], elapsed_seconds=time.perf_counter()-start,
+                  inference_runtime=spec.get("inference_runtime", LEGACY_INFERENCE_RUNTIME),
                   metadata=metadata(), memory=memory(), scope="general LM teacher-forced NLL only")
     write_json(output, result)
     return result
@@ -166,6 +171,7 @@ def profile(artifact, output, device="cpu", lengths=(128, 512), decode_tokens=32
             "decode_tokens_per_second": batch_size*decode_tokens/statistics.median(decode),
             "kv_cache_bytes": cache_bytes, "memory": memory()})
     result = {"metadata": metadata(), "artifact_sha256": spec["weight_sha256"],
+        "inference_runtime": spec.get("inference_runtime", LEGACY_INFERENCE_RUNTIME),
         "parameters": sum(p.numel() for p in model.parameters()),
         "resident_parameter_bytes": sum(p.numel()*p.element_size() for p in model.parameters()),
         "serialized_weight_bytes": spec["weight_bytes"], "dtype": spec["dtype"],

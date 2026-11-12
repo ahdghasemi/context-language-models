@@ -78,6 +78,33 @@ def test_empty_clm_results_cannot_pass(tmp_path):
         aggregate.validate_episodes(config, summary)
 
 
+def test_legacy_precision_cannot_pass_current_baseline_gate():
+    from tiny_clm.provenance import INFERENCE_RUNTIME, require_gate, protocol_contract
+    aggregate = load_script("aggregate")
+    config = json.loads((ROOT/"configs/pilot.json").read_text())
+    spec = {"stage": "baseline", "config": config, "commit": "fixture"}
+    rows = [{"run_id": "original", "status": "complete", "method": "original",
+             "inference_runtime": "whole-model-dtype-cast-v1"}]
+    episodes = {"original": [{"mode": "clm", "rewards": {"reward": 1.0}}]}
+    assert not aggregate.gate(spec, rows, episodes)["passed"]
+    rows[0]["inference_runtime"] = INFERENCE_RUNTIME
+    assert aggregate.gate(spec, rows, episodes)["passed"]
+    contract = protocol_contract(config, baseline=True)
+    del contract["inference_runtime"]
+    with pytest.raises(ValueError, match="protocol"):
+        require_gate({"passed": True, "gate_type": "baseline", "protocol_contract": contract}, config, "baseline")
+
+
+def test_mixed_episode_precision_is_rejected():
+    from tiny_clm.provenance import INFERENCE_RUNTIME
+    aggregate = load_script("aggregate")
+    config = json.loads((ROOT/"configs/pilot.json").read_text())
+    summary = {"contextbench": config["contextbench"], "source_revision": config["contextbench"]["revision"],
+               "inference_runtime": INFERENCE_RUNTIME, "episodes": [{"inference_runtime": "legacy"}]}
+    with pytest.raises(ValueError, match="mixed inference precision"):
+        aggregate.validate_episodes(config, summary)
+
+
 def test_snapshot_detects_overwritten_and_added_source(tmp_path):
     from tiny_clm.provenance import snapshot_files, verify_snapshot, canonical_hash
     (tmp_path/"code.py").write_text("original")

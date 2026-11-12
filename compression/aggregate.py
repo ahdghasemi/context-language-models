@@ -13,7 +13,7 @@ import statistics
 import numpy as np
 
 from tiny_clm.io import digest, read_json, write_json
-from tiny_clm.provenance import protocol_contract
+from tiny_clm.provenance import protocol_contract, INFERENCE_RUNTIME, LEGACY_INFERENCE_RUNTIME
 
 
 def validate_episodes(config, summary):
@@ -21,6 +21,9 @@ def validate_episodes(config, summary):
     if summary["contextbench"] != cb or summary["source_revision"] != cb["revision"]:
         raise ValueError("ContextBench results use different tasks or decoding settings")
     episodes = summary["episodes"]
+    runtime = summary.get("inference_runtime", LEGACY_INFERENCE_RUNTIME)
+    if any(e.get("inference_runtime", LEGACY_INFERENCE_RUNTIME) != runtime for e in episodes):
+        raise ValueError("ContextBench episodes use mixed inference precision policies")
     keys = [(e["episode"], e["mode"]) for e in episodes]
     expected = len(cb["tasks"])*len(cb["seeds"])
     if len(keys) != len(set(keys)) or Counter(e["mode"] for e in episodes) != {m: expected for m in cb["modes"]}:
@@ -38,7 +41,7 @@ def collect(spec):
                "selected_keep_requested": cfg["selection"]["keep"], "selection_kind": cfg["selection"]["kind"],
                "penalty_schedule": str(cfg["penalty"]), "status": "incomplete"}
         row["ablation_constant_mu"] = cfg.get("ablation_constant_mu")
-        missing, identity = [], {}
+        missing, identity, runtimes = [], {}, set()
         for filename, key in [("status.json", "training"), ("evaluation.json", "evaluation"),
                               ("deployment_gap.json", "gap"), ("profile.json", "profile"),
                               ("export/compression.json", "artifact"), ("contextbench/summary.json", "clm")]:
@@ -46,6 +49,8 @@ def collect(spec):
                 missing.append(filename)
                 continue
             value = read_json(root/filename)
+            if key in {"artifact", "evaluation", "profile", "clm", "gap"}:
+                runtimes.add(value.get("inference_runtime", LEGACY_INFERENCE_RUNTIME))
             if key in {"evaluation", "profile"}:
                 identity[key] = value["artifact_sha256"]
             elif key == "artifact":
@@ -84,6 +89,9 @@ def collect(spec):
             row["recorded_failure"] = read_json(root/"failure.json")
         if len(set(identity.values())) > 1:
             raise ValueError("mixed artifact identities in run "+rid)
+        if len(runtimes) > 1:
+            raise ValueError("mixed inference precision policies in run "+rid)
+        row["inference_runtime"] = next(iter(runtimes), None)
         row["missing"] = ";".join(missing)
         if not missing and row.get("training_status") == "complete" and row.get("clm_all_complete"):
             row["status"] = "complete"
@@ -104,6 +112,8 @@ def paired_summary(rows, episodes):
         dense = next((r for r in rows if r["method"] == "dense_matched" and r["seed"] == row["seed"] and r["status"] == "complete"), None)
         if dense is None:
             continue
+        if dense.get("inference_runtime") != row.get("inference_runtime"):
+            raise ValueError("paired comparisons require the same inference precision policy")
         baseline = {(e["episode"], e["mode"]): e for e in episodes[dense["run_id"]]}
         for e in episodes[row["run_id"]]:
             b = baseline.get((e["episode"], e["mode"]))
@@ -161,7 +171,9 @@ def gate(spec, rows, episodes):
                         reference >= thresholds["min_dense_clm_reward"] and
                         e["rewards"]["reward"] >= reference-thresholds["max_clm_absolute_drop"])
         candidates.append({"run_id": row["run_id"], "checks": checks, "passed": all(checks.values())})
-    return {"passed": bool(candidates) and all(r["status"] == "complete" for r in rows) and any(c["passed"] for c in candidates),
+    runtime_ok = bool(rows) and all(r.get("inference_runtime") == INFERENCE_RUNTIME for r in rows)
+    return {"passed": runtime_ok and bool(candidates) and all(r["status"] == "complete" for r in rows) and any(c["passed"] for c in candidates),
+            "inference_runtime_verified": runtime_ok,
             "gate_type": "baseline" if baseline else "pilot",
             "protocol_contract": protocol_contract(spec["config"], baseline=baseline),
             "thresholds_provisional": True, "thresholds": thresholds, "candidates": candidates,

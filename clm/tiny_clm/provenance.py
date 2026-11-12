@@ -4,6 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 
+INFERENCE_RUNTIME = "qwen3-fp32-rope-v2"
+LEGACY_INFERENCE_RUNTIME = "whole-model-dtype-cast-v1"
+
 
 def canonical_hash(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -24,7 +27,8 @@ def select_task_records(tasks, names=None):
 
 def protocol_contract(config, *, baseline=False):
     cb = config["contextbench"]
-    result = {"model": config["model"], "data": config["data"],
+    result = {"inference_runtime": INFERENCE_RUNTIME,
+              "model": config["model"], "data": config["data"],
               "export_dtype": config["export_dtype"],
               "contextbench": {k: cb[k] for k in ("revision", "budget", "reserve", "max_tokens",
                   "temperature", "top_p", "enable_thinking", "modes", "budget_tokenizer", "calibrate_budget")},
