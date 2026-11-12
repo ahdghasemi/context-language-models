@@ -74,8 +74,10 @@ nonzero after preserving the diagnostic. No acceptance threshold was changed.
 The new CPU tests cover single/multiple cache updates, explicit positions,
 FP32/BF16 native/export agreement, nonfinite results, strict export comparisons,
 source checksum failure, and a real archived snapshot with a mocked scheduler.
-The full suite ran from a read-only archive without Git metadata: **106 passed,
-1 SDK-dependent test skipped**. Actual 4B GPU execution of this diagnostic
-remains pending. Its output must be
-inspected before deciding whether to fix cache handling, change a numerical
-backend, or revise the cache criterion with an explicit native-model control.
+At implementation, the full suite ran from a read-only archive without Git
+metadata: **106 passed, 1 SDK-dependent test skipped**. The user subsequently
+completed this diagnostic on the 4B model and supplied its output. Native and
+exported models passed the same-path comparisons and showed the same cached/full
+differences. See [NATIVE_CACHE_SCREEN.md](NATIVE_CACHE_SCREEN.md) for the measured
+results, limitations, and explicit subsequent change to the screen criterion.
+The standalone diagnostic remains unable to authorize a screen or training run.

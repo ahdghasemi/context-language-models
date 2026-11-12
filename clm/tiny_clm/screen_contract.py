@@ -6,6 +6,41 @@ from pathlib import Path
 
 from .provenance import canonical_hash, select_task_records, INFERENCE_RUNTIME
 
+CACHE_CONTRACT = "native-reference-cache-v1"
+CACHE_CASES = ("screen_last_token", "screen_suffix_8", "synthetic_2048_suffix_8")
+CACHE_PATHS = ("full", "implicit", "explicit")
+
+
+def cache_verification_passed(check):
+    """Require explicit native controls, not a renamed legacy cache-pass flag."""
+    if not isinstance(check, dict) or check.get("contract") != CACHE_CONTRACT:
+        return False
+    comparisons = check.get("native_export", {})
+    positions = check.get("explicit_positions", {})
+    if set(comparisons) != set(CACHE_CASES) or set(positions) != {"native", "exported"}:
+        return False
+    measurements = []
+    for case in CACHE_CASES:
+        if set(comparisons[case]) != set(CACHE_PATHS):
+            return False
+        measurements.extend(comparisons[case].values())
+    for model in positions.values():
+        if set(model) != set(CACHE_CASES):
+            return False
+        measurements.extend(model.values())
+    if any(m.get("finite") is not True or m.get("allclose") is not True or
+           m.get("rtol") != 1e-4 or m.get("atol") != 1e-4 for m in measurements):
+        return False
+    return check.get("generation_equal") == {"cached": True, "uncached": True}
+
+
+def export_verified(audit, model):
+    return bool(audit and audit.get("reload_passed") is True and
+                audit.get("identical_parameters_and_buffers") is True and
+                audit.get("inference_runtime") == INFERENCE_RUNTIME and audit.get("model") == model and
+                cache_verification_passed(audit.get("cache_verification")) and
+                audit["cache_verification"].get("passed") is True)
+
 
 def validate_screen(config, reference, lock):
     if set(config) != {"model", "export_dtype", "contextbench", "screen"}:
@@ -50,8 +85,7 @@ def screen_report(config, lock, audit, summary):
     expected = {(m, Path(t["path"]).name): t["sha256"]
                 for m in config["contextbench"]["modes"] for t in tasks}
     errors, records, seen = [], [], set()
-    if (not audit or not audit.get("reload_passed") or not audit.get("cache_passed") or
-            audit.get("inference_runtime") != INFERENCE_RUNTIME or audit.get("model") != config["model"]):
+    if not export_verified(audit, config["model"]):
         errors.append("missing or incompatible export audit")
     if (not summary or not summary.get("all_complete") or
             summary.get("contextbench") != config["contextbench"] or
@@ -80,6 +114,8 @@ def screen_report(config, lock, audit, summary):
     complete = not errors
     clm = [e["rewards"]["reward"] for e in records if e["mode"] == "clm"] if complete else []
     return {"gate_type": "backbone_screen", "inference_runtime": INFERENCE_RUNTIME,
+            "cache_verification_contract": CACHE_CONTRACT,
+            "export_verified": export_verified(audit, config["model"]),
             "passed": complete and bool(clm) and
                 min(clm) >= config["screen"]["min_clm_reward"],
             "complete": complete, "errors": errors, "episodes": records,

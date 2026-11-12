@@ -13,7 +13,7 @@ import subprocess
 from submit import ROOT, read, write, snapshot, resource_args
 from tiny_clm.environment import verify_environment
 from tiny_clm.provenance import verify_snapshot
-from tiny_clm.screen_contract import validate_screen
+from tiny_clm.screen_contract import validate_screen, CACHE_CONTRACT
 from tiny_clm.slurm import submission_environment
 
 
@@ -67,6 +67,7 @@ def main(argv=None):
                                            str(campaign/"manifest.json"), name]))
         displayed.append((name, command, parent, kind))
     print(json.dumps({"dry_run": not a.submit, "campaign": str(campaign), "commit": commit,
+        "cache_verification_contract": CACHE_CONTRACT,
         "model": cfg["model"], "episodes": 0 if a.prepare_only else
             len(cfg["screen"]["task_names"])*len(cfg["contextbench"]["modes"]), "training": False}, indent=2))
     if not a.submit:
@@ -82,6 +83,7 @@ def main(argv=None):
     batch_env = submission_environment()
     batch_env["TINY_CLM_VENV"] = str(venv)
     spec = {"stage": "backbone_screen", "commit": commit, "config": cfg,
+        "cache_verification_contract": CACHE_CONTRACT,
         "campaign": str(campaign), "venv": str(venv), "environment": environment,
         "snapshot": str(snap), "snapshot_hash": verify_snapshot(snap),
         "reference_manifest": str(Path(a.reference_manifest).resolve()),

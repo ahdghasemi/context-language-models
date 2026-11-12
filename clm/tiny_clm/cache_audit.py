@@ -13,7 +13,6 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 from .io import file_sha, memory, metadata, read_json, seed_all, write_json
 from .model import dense_model, deployment_precision, inference_state, load_export, tokenizer_from
 from .provenance import INFERENCE_RUNTIME
-from .screen import model_lock
 
 
 def comparison(actual, reference, *, rtol=1e-4, atol=1e-4):
@@ -99,6 +98,7 @@ def validate_source(manifest_path, *, verify_weights=False):
 
 
 def run(spec):
+    from .screen import model_lock
     campaign = Path(spec["campaign"])
     output = campaign/"cache-audit.json"
     if output.exists():

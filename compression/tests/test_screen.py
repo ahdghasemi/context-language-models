@@ -9,7 +9,8 @@ import sys
 import pytest
 
 from tiny_clm.provenance import canonical_hash, require_gate, select_task_records, verify_snapshot, INFERENCE_RUNTIME
-from tiny_clm.screen_contract import qwen3_counts, screen_report, validate_screen
+from tiny_clm.screen_contract import (qwen3_counts, screen_report, validate_screen,
+    CACHE_CONTRACT, CACHE_CASES, CACHE_PATHS)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,8 +22,13 @@ def fixture():
             "revision": config["contextbench"]["revision"], "image_sha256": "image",
             "tasks": [{"path": "/task/kv-store-R1000-seed1101", "sha256": "unselected"},
                       {"path": "/task/kv-store-R130-seed1101", "sha256": "selected"}]}
-    audit = {"reload_passed": True, "cache_passed": True, "inference_runtime": INFERENCE_RUNTIME,
-             "model": config["model"], "weight_sha256": "weights"}
+    measurement = {"finite": True, "allclose": True, "rtol": 1e-4, "atol": 1e-4}
+    audit = {"reload_passed": True, "identical_parameters_and_buffers": True, "inference_runtime": INFERENCE_RUNTIME,
+             "model": config["model"], "weight_sha256": "weights", "cache_verification": {
+                 "contract": CACHE_CONTRACT, "passed": True,
+                 "native_export": {c: {p: dict(measurement) for p in CACHE_PATHS} for c in CACHE_CASES},
+                 "explicit_positions": {m: {c: dict(measurement) for c in CACHE_CASES} for m in ("native", "exported")},
+                 "generation_equal": {"cached": True, "uncached": True}}}
     episodes = [{"mode": m, "episode": config["screen"]["task_names"][0],
                  "status": "complete", "error": None, "returncode": 0,
                  "rewards": {"grader_valid": 1, "reward": 0.0}, "weight_sha256": "weights",
@@ -93,7 +99,7 @@ def test_partial_or_mixed_evidence_cannot_pass(mutation):
     elif mutation == "runtime":
         ep["inference_runtime"] = "legacy"
     elif mutation == "cache":
-        audit["cache_passed"] = False
+        audit["cache_verification"]["passed"] = False
     else:
         summary["container_sha256"] = "changed"
     report = screen_report(cfg, lock, audit, summary)
@@ -174,6 +180,7 @@ def test_real_snapshot_mock_scheduler_and_dry_run(tmp_path, monkeypatch, git_rep
     assert not campaign.exists() and not calls and not verified
     driver.main(args+["--submit"])
     manifest = json.loads((campaign/"manifest.json").read_text())
+    assert manifest["cache_verification_contract"] == CACHE_CONTRACT
     verify_snapshot(manifest["snapshot"], manifest["snapshot_hash"])
     assert len(calls) == 5
     for index, parent in [(1, 101), (2, 102), (3, 103)]:

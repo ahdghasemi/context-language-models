@@ -1,5 +1,11 @@
 # Qwen3 export precision correction
 
+Follow-up: the 4B GPU reload subsequently passed with zero logit error and
+identical parameter/buffer fingerprints. A separate native-model cache audit
+motivated the explicitly versioned screen criterion described in
+[NATIVE_CACHE_SCREEN.md](NATIVE_CACHE_SCREEN.md). The original cache tolerance
+below is retained as a diagnostic there; it is no longer an export gate.
+
 The v1 deployment path called `model.to(dtype=torch.bfloat16)` on the entire
 model. This casts floating-point buffers as well as parameters. In Qwen3 it
 rounds the nonpersistent `model.rotary_emb.inv_freq` buffer, which native
@@ -73,8 +79,9 @@ PYTHONPATH=clm HF_HUB_OFFLINE=1 python -m tiny_clm.smoke \
 
 The smoke output directory must be new. These tests use random weights/tokens;
 they establish software behavior, not language or context-management quality.
-The corrected real 4B CUDA export and ContextBench screen remain unexecuted in
-the development environment and must pass on the target GPU before proceeding.
+The corrected real 4B CUDA reload subsequently passed in user-supplied output;
+see the follow-up above for the cache audit and revised screen. The development
+environment remains CPU-only, and no 4B ContextBench capability result is claimed.
 
 ## Interpretation of earlier results
 

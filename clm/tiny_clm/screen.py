@@ -12,7 +12,8 @@ import time
 
 from .io import exclusive, file_sha, memory, metadata, read_json, seed_all, write_json
 from .provenance import verify_snapshot, INFERENCE_RUNTIME
-from .screen_contract import qwen3_counts, screen_report, validate_screen
+from .screen_contract import (qwen3_counts, screen_report, validate_screen, export_verified,
+                              CACHE_CONTRACT, CACHE_CASES, CACHE_PATHS, cache_verification_passed)
 
 
 def verify_model_lock(path, config):
@@ -78,6 +79,40 @@ def model_lock(spec):
     return verify_model_lock(path, spec["config"])
 
 
+def cache_probe(model, ids, pad_token_id):
+    """Probe the actual serving dtype/backend using the same inputs on each model."""
+    import torch
+    from .cache_audit import capture
+    long_ids = ids.repeat(1, (2048+ids.shape[1]-1)//ids.shape[1])[:, :2048]
+    inputs = ((ids, 1), (ids, 8), (long_ids, 8))
+    values = {name: capture(model, tokens, steps) for name, (tokens, steps) in zip(CACHE_CASES, inputs)}
+    generation = {}
+    with torch.inference_mode():
+        for cached in (True, False):
+            output = model.generate(ids, attention_mask=torch.ones_like(ids), max_new_tokens=16,
+                do_sample=False, use_cache=cached, pad_token_id=pad_token_id)
+            generation["cached" if cached else "uncached"] = output[0, ids.shape[1]:].tolist()
+    return values, generation
+
+
+def verify_cache_probe(native, exported, native_tokens, exported_tokens):
+    """Separate strict same-path export fidelity from within-model rounding effects."""
+    from .cache_audit import comparison, within_model
+    check = {"contract": CACHE_CONTRACT,
+        "native_export": {case: {path: comparison(exported[case][path], native[case][path])
+                                  for path in CACHE_PATHS} for case in CACHE_CASES},
+        "explicit_positions": {label: {case: comparison(v["explicit"], v["implicit"])
+                               for case, v in values.items()}
+                               for label, values in (("native", native), ("exported", exported))},
+        "generation_equal": {path: native_tokens[path] == exported_tokens[path] for path in ("cached", "uncached")},
+        "generation_ids": {"native": native_tokens, "exported": exported_tokens},
+        "cached_vs_full_diagnostics": {label: {case: within_model(values) for case, values in cases.items()}
+                                       for label, cases in (("native", native), ("exported", exported))},
+        "scope": "same-path fidelity to native BF16 inference; cached/full equivalence and task quality are not asserted"}
+    check["passed"] = cache_verification_passed(check)
+    return check
+
+
 def export(spec):
     import torch
     from .model import dense_model, export_model, load_export, tokenizer_from, inference_state
@@ -107,6 +142,7 @@ def export(spec):
     ids = tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
     with torch.inference_mode():
         before = model(input_ids=ids, use_cache=False).logits[:, -1].float().cpu()
+    native_cache, native_tokens = cache_probe(model, ids, tokenizer.eos_token_id)
     source_state = inference_state(model)
     info = export_model(model, campaign/"export", {}, tokenizer=tokenizer, dtype="bfloat16",
                provenance={"model": spec["config"]["model"], "screen_only": True,
@@ -136,7 +172,8 @@ def export(spec):
         "identical_parameters_and_buffers": source_state == reloaded_state,
         "reload_passed": finite and source_state == reloaded_state and
                          torch.allclose(after, before, rtol=1e-4, atol=1e-4),
-        "cache_passed": False, "reload_tolerance": {"rtol": 1e-4, "atol": 1e-4},
+        "cache_verification": {"contract": CACHE_CONTRACT, "passed": False},
+        "reload_tolerance": {"rtol": 1e-4, "atol": 1e-4},
         "reload_max_abs_error": (after-before).abs().max().item() if finite else None,
         "legacy_buffer_cast_max_abs_logit_error": (legacy-before).abs().max().item() if finite else None,
         "finite_logits": finite, "counts": counts, "whole_keep": 1.0, "metadata": metadata(),
@@ -148,20 +185,13 @@ def export(spec):
     if source_state != reloaded_state:
         raise ValueError("save/reload changed parameter bytes or runtime buffers; see export-audit.json")
     torch.testing.assert_close(after, before, rtol=1e-4, atol=1e-4)
-    # Cache compatibility test uses fixed tokens; it is not a quality measurement.
-    with torch.inference_mode():
-        prefix = reloaded(input_ids=ids[:, :-1], use_cache=True)
-        cached = reloaded(input_ids=ids[:, -1:], past_key_values=prefix.past_key_values,
-                          use_cache=True).logits[:, -1].float().cpu()
-    # BF16 SDPA may accumulate differently for a one-token cached query.
-    cache_finite = bool(torch.isfinite(cached).all())
-    audit.update({"cache_passed": cache_finite and torch.allclose(cached, after, rtol=0.02, atol=0.25),
-        "cache_max_abs_error": (cached-after).abs().max().item() if cache_finite else None,
-        "cache_tolerance": {"rtol": 0.02, "atol": 0.25},
+    exported_cache, exported_tokens = cache_probe(reloaded, ids, tokenizer.eos_token_id)
+    audit.update({"cache_verification": verify_cache_probe(native_cache, exported_cache, native_tokens, exported_tokens),
         "template_tools_present": True, "counts": counts, "whole_keep": 1.0,
         "elapsed_seconds": time.perf_counter()-start, "memory": memory()})
     write_json(campaign/"export-audit.json", audit)
-    torch.testing.assert_close(cached, after, rtol=0.02, atol=0.25)
+    if not export_verified(audit, spec["config"]["model"]):
+        raise ValueError("native/export cache fidelity failed; see export-audit.json")
     print("SCREEN_EXPORT_VERIFIED", flush=True)
 
 
@@ -176,6 +206,8 @@ def main():
     verify_environment(spec["venv"], spec["environment"])
     if read_json(campaign/"config.json") != spec["config"] or spec["stage"] != "backbone_screen":
         raise ValueError("screen manifest/config mismatch")
+    if spec.get("cache_verification_contract") != CACHE_CONTRACT:
+        raise ValueError("screen cache contract changed; preserve the old campaign and submit a new one")
     for key in ("reference_manifest", "contextbench_lock"):
         if file_sha(spec[key]) != spec[key+"_sha256"]:
             raise ValueError(key+" changed after submission")
@@ -200,8 +232,7 @@ def main():
     elif stage == "screen_contextbench":
         from .contextbench import run
         audit = read_json(campaign/"export-audit.json")
-        if (not audit["reload_passed"] or not audit["cache_passed"] or
-                audit["inference_runtime"] != INFERENCE_RUNTIME or
+        if (not export_verified(audit, spec["config"]["model"]) or
                 file_sha(campaign/"export/model.safetensors") != audit["weight_sha256"]):
             raise ValueError("export is not verified")
         run(campaign/"export", spec["config"], spec["contextbench_lock"], campaign/"contextbench",
