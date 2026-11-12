@@ -31,6 +31,8 @@ def main():
         command = [sys.executable, "-m", "tiny_clm.contextbench", "prepare", "--config", str(campaign/"config.json"),
                    "--source", spec["contextbench_source"], "--destination", spec["contextbench_dir"],
                    "--recipe", str(snapshot/"compression/contextbench.def")]
+    elif stage.startswith("screen_"):
+        command = [sys.executable, "-m", "tiny_clm.screen", str(manifest), stage]
     elif stage == "aggregate":
         command = [sys.executable, str(snapshot/"compression/aggregate.py"), "--manifest", str(manifest)]
     else:

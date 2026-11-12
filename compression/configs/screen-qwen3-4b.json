@@ -1,0 +1,59 @@
+{
+  "model": {
+    "id": "Qwen/Qwen3-4B-Instruct-2507",
+    "revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+    "provenance": "general post-trained non-thinking instruction model; not a CLM-RL checkpoint"
+  },
+  "export_dtype": "bfloat16",
+  "contextbench": {
+    "revision": "fb533c18c78a82d3f1b2047a9c1700735cf829ae",
+    "budget": 32768,
+    "reserve": 2048,
+    "max_tokens": 1024,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "enable_thinking": false,
+    "max_steps": 128,
+    "episode_timeout": 1800,
+    "modes": [
+      "clm",
+      "append_only"
+    ],
+    "seeds": [
+      1101,
+      1102
+    ],
+    "tasks": [
+      {
+        "family": "kv_store",
+        "level": "R130"
+      },
+      {
+        "family": "kv_store",
+        "level": "R1000"
+      }
+    ],
+    "budget_tokenizer": "o200k_base",
+    "calibrate_budget": false
+  },
+  "screen": {
+    "no_training": true,
+    "server_start_timeout": 600,
+    "task_names": [
+      "kv-store-R130-seed1101"
+    ],
+    "min_clm_reward": 0.5,
+    "audited_model_config": {
+      "model_type": "qwen3",
+      "hidden_size": 2560,
+      "intermediate_size": 9728,
+      "head_dim": 128,
+      "num_hidden_layers": 36,
+      "num_attention_heads": 32,
+      "num_key_value_heads": 8,
+      "vocab_size": 151936,
+      "tie_word_embeddings": true,
+      "attention_bias": false
+    }
+  }
+}

@@ -14,6 +14,7 @@ import urllib.request
 
 from .io import digest, exclusive, file_sha, metadata, read_json, write_json
 from .container import container_environment
+from .provenance import select_task_records
 
 
 def tree_hash(root):
@@ -149,11 +150,12 @@ def wait_server(process, url, expected_sha, deadline=180):
     raise TimeoutError("reference server did not become ready")
 
 
-def run(artifact, config, lock_path, output, device="cuda"):
+def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, server_timeout=180):
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
     cb, lock = config["contextbench"], read_json(lock_path)
     verify_lock(lock, cb)
+    selected = {t["path"] for t in select_task_records(lock["tasks"], task_names)}
     if not shutil.which("singularity"):
         raise RuntimeError("Harbor needs the singularity compatibility executable from Apptainer")
     spec = read_json(Path(artifact)/"compression.json")
@@ -174,6 +176,8 @@ def run(artifact, config, lock_path, output, device="cuda"):
         agent = {"clm": "clm_contextbench:ClmStream",
                  "append_only": "contextbench.harbor.agents.base:ContextBenchAgent"}[mode]
         for ti, task in enumerate(lock["tasks"]):
+            if task["path"] not in selected:
+                continue  # Preserve original task indices (and model RNG seeds).
             path = Path(task["path"])
             if tree_hash(path) != task["sha256"]:
                 raise ValueError(f"prepared task changed: {path}")
@@ -200,7 +204,7 @@ def run(artifact, config, lock_path, output, device="cuda"):
                     "--log", str(usage_path), "--seed", str(10000+ti)], stdout=logfile, stderr=subprocess.STDOUT, env=env)
                 start = time.perf_counter()
                 try:
-                    wait_server(server, api, spec["weight_sha256"])
+                    wait_server(server, api, spec["weight_sha256"], deadline=server_timeout)
                     kwargs = {"api_base": api+"/v1", "context_budget_tokens": cb["budget"],
                         "context_budget_reserve_tokens": cb["reserve"], "max_tokens": cb["max_tokens"],
                         "temperature": cb["temperature"], "top_p": cb["top_p"], "max_steps": cb["max_steps"]}
@@ -255,6 +259,8 @@ def run(artifact, config, lock_path, output, device="cuda"):
               "container_sha256": lock["image_sha256"], "source_revision": lock["revision"],
               "all_complete": all(r["status"] == "complete" for r in episodes),
               "scope": "original CLM harness and ContextBench append-only agent; substituted Qwen3 backbone and stated decoding"}
+    if task_names is not None:
+        result["screen_task_names"] = list(task_names)
     write_json(out/"summary.json", result)
     if not result["all_complete"]:
         raise RuntimeError("ContextBench has failed episodes; see summary.json and logs")

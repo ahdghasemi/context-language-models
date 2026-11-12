@@ -92,17 +92,22 @@ def main():
     if args.samples < 1 or args.chars < 100:
         parser.error("samples must be positive and chars must be >=100")
     spec = read(args.campaign/"manifest.json")
-    rows = [r for r in spec["rows"] if args.run_id is None or r["run_id"] == args.run_id]
-    if not rows:
+    if spec.get("stage") == "backbone_screen":
+        if args.run_id is not None:
+            parser.error("a backbone screen has no training run ID; omit --run-id")
+        locations = [("backbone_screen", args.campaign/"contextbench")]
+    else:
+        locations = [(r["run_id"], args.campaign/"runs"/r["run_id"]/"contextbench")
+                     for r in spec["rows"] if args.run_id is None or r["run_id"] == args.run_id]
+    if not locations:
         parser.error("run-id is not in the campaign")
     print("Read-only retained-message excerpts; not raw token IDs or a full execution history.")
-    for row in rows:
-        root = args.campaign/"runs"/row["run_id"]/"contextbench"
+    for run_id, root in locations:
         summary = read(root/"summary.json")
         allowed = {e["mode"]+"--"+e["episode"] for e in summary["episodes"]}
         if not set(args.episode) <= allowed:
             parser.error(f"Unknown episode; available: {sorted(allowed)}")
-        print("RUN", row["run_id"], "COMMIT", spec["commit"])
+        print("RUN", run_id, "COMMIT", spec["commit"])
         for name in args.episode:
             inspect(root, name, args.samples, args.chars)
 

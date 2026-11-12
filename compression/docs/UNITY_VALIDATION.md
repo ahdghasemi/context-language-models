@@ -328,3 +328,27 @@ user environment was modified. The fixture tests exercise an actual localhost HT
 exchange, reject dropped tools and text-only replies, and preserve saved transcripts.
 Python compilation and diff checks passed. The full SDK probe still requires execution
 in the user's already installed Unity environment; no new GPU run was performed.
+
+### Unity client transport result and next diagnostic
+
+The user subsequently ran `compression/check_client_protocol.py` at
+`78e579dd0091837f53bbf5d92751596e8cb955dc` on Unity. It reported
+`CLM_CLIENT_PROTOCOL_PASSED`: request tools, decoding settings, structured response
+and original action extraction all passed. Versions: LiteLLM 1.109.0, OpenAI 3.49.0,
+Harbor 0.16.1. This is actual user-supplied execution evidence for the synthetic
+round trip; no model generation or task execution occurs in that probe. The previous
+paragraph's untested status for this probe is superseded by this output.
+
+Added a separate [two-episode 4B screen](BACKBONE_SCREEN.md), preserving the original
+protocol and reusing the locked task container. It changes the backbone explicitly,
+performs no training and cannot satisfy baseline/pilot gates. No results from that
+model are available yet. Baseline-003 remains a valid zero-reward negative result.
+
+Follow-up local validation (2026-11-12): **44 passed, 1 skipped, 2 deselected**
+for the screen, container environment, Slurm environment, installed-environment
+fingerprint, workflow, client fixture and transcript inspector tests. The real SDK
+probe is skipped locally (its Unity pass is recorded above). Two existing aggregate
+tests were deselected because this runtime has no PyTorch. No Torch/Transformers
+model execution is claimed for the new screen. Python compilation, shell syntax and
+Git whitespace checks passed. The screen's first Unity job runs the full inexpensive
+suite, including the tests unavailable here, before downloading or running the 4B model.

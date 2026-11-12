@@ -9,6 +9,19 @@ def canonical_hash(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def select_task_records(tasks, names=None):
+    """Select an explicit screen subset without changing task order or its lock."""
+    tasks = list(tasks)
+    if names is None:
+        return tasks
+    available = [Path(t["path"]).name for t in tasks]
+    if len(set(available)) != len(available):
+        raise ValueError("ambiguous task names in lock")
+    if not names or len(set(names)) != len(names) or set(names) - set(available):
+        raise ValueError("screen task names must be nonempty, unique, and present in the lock")
+    return [t for t in tasks if Path(t["path"]).name in names]
+
+
 def protocol_contract(config, *, baseline=False):
     cb = config["contextbench"]
     result = {"model": config["model"], "data": config["data"],

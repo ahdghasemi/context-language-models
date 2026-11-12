@@ -134,3 +134,16 @@ set `CLM_TOK_RATIO=0` for the primary two-mode comparison, so both use the bench
 fixed o200k ruler; native Qwen prompt counts are separately logged. This is a disclosed
 harness setting, not a change to the original harness implementation. The model's native
 40960-token safety limit still applies, and a mismatch/overflow remains visible.
+
+## Follow-up backbone candidate after baseline-003
+
+The inference-only screen is specified in [BACKBONE_SCREEN.md](BACKBONE_SCREEN.md).
+Qwen3-4B-Instruct-2507's official pinned config, weight index, tokenizer template and
+Transformers 4.57.1 Qwen3 definitions were inspected. It retains supported Qwen3
+linears/tying/normalization and native tool tags; it is a general instruction model,
+not a CLM-RL checkpoint. Its weights, GPU loading and CLM behavior have not yet been
+executed in this follow-up. Analytical parameter accounting includes tied embeddings
+and all normalization parameters. The small published index-size discrepancy is
+recorded explicitly, pending actual file/weight inspection. The all-MLP training
+footprint already exceeds the observed GPU capacity before workspaces; this screen
+must not be interpreted as approval to launch the current 4B compression grid.

@@ -46,3 +46,21 @@ def test_missing_transcripts_fail_clearly(tmp_path):
 def test_long_excerpts_keep_head_and_tail_with_explicit_truncation():
     result = inspector.excerpt("HEAD"+"x"*200+"TAIL", 100)
     assert "HEAD" in result and "TAIL" in result and "characters omitted" in result
+
+
+@pytest.mark.parametrize("stage", ["baseline", "backbone_screen"])
+def test_cli_locates_screen_and_baseline_transcripts(tmp_path, monkeypatch, capsys, stage):
+    import sys
+    spec = {"stage": stage, "commit": "fixture", "rows": [{"run_id": "original"}]}
+    (tmp_path/"manifest.json").write_text(json.dumps(spec))
+    root = tmp_path/"contextbench" if stage == "backbone_screen" else tmp_path/"runs/original/contextbench"
+    agent = root/"trials/clm--fixture/agent"
+    agent.mkdir(parents=True)
+    (root/"summary.json").write_text(json.dumps({"episodes": [{"mode": "clm", "episode": "fixture"}]}))
+    (root/"clm--fixture.json").write_text(json.dumps({"status": "complete", "rewards": {"reward": 0}}))
+    (agent/"trajectory.json").write_text(json.dumps([{"role": "assistant", "content": "OBSERVED_REPLY"}]))
+    monkeypatch.setattr(sys, "argv", ["inspect_contextbench.py", "--campaign", str(tmp_path), "--episode", "clm--fixture"])
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    inspector.main()
+    assert "OBSERVED_REPLY" in capsys.readouterr().out
+    assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
