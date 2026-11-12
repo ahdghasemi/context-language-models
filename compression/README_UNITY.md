@@ -9,8 +9,8 @@ No account, QoS or GPU type is invented or silently selected.
 
 Update from user-supplied Unity terminal output: the environment check, all 43 tests,
 and the tiny CUDA smoke passed inside an existing A100-80GB allocation. The first
-container build failed on the site's /nas bind; the recipe now precreates that bind
-destination. A successful rebuilt container, CLM episodes, and the dependency-driven
+container builds failed on inherited /nas and /work binds. Container subprocesses now
+clear inherited bind/mount variables. A successful rebuilt container, CLM episodes, and the dependency-driven
 Slurm campaigns are still unverified. See [Unity validation](docs/UNITY_VALIDATION.md).
 
 Official references:
@@ -341,25 +341,42 @@ an unrelated pricing-map download at import time on compute nodes. It does not s
 credentials or contact an external model API. The readiness check imports both original
 agent classes as well as checking their budget counters.
 
-## Container build failure: missing /nas destination
+## Container build failure: inherited Unity filesystem mounts
 
-On the observed Unity node, a site bind of `/nas` is applied while entering the writable
-build container for `%post`. Without that directory in the image, Apptainer cannot
-create the bind point with overlay/underlay and stops before package installation.
-The definition file now creates `$APPTAINER_ROOTFS/nas` in `%setup`, before that mount.
-It never creates or modifies the host `/nas` directory. This follows the documented
-[build bind-point workaround](https://apptainer.org/docs/user/1.5/build_a_container.html#bind).
+The observed Unity module exports `APPTAINER_BINDPATH` with eleven host filesystem
+paths. Apptainer 1.5.5 forwards BINDPATH/MOUNT variables into its nested writable `%post`
+execution, where missing bind destinations cause failure. The first `/nas`-only recipe
+fix merely exposed the next missing directory, `/work`, and has been removed.
+
+`tiny_clm.container.container_environment` now clears `APPTAINER_BIND`,
+`APPTAINER_BINDPATH`, `APPTAINER_MOUNT` and their `SINGULARITY_` counterparts in a copy
+of the child environment for image building, the runtime preflight and Harbor episodes.
+Explicit command-line mounts, containment flags, cache paths and temporary paths are
+preserved. The calling shell and system configuration are untouched. In the observed
+system configuration, `mount hostfs=no` and the only configured bind paths are the
+standard `/etc/localtime` and `/etc/hosts` files. A different system configuration may
+require further investigation; this is not a general bypass of all site mounts.
 
 For the reported failure, preserve the failed preparation log and rename the incomplete
-task destination to a unique `.failed-nas-<timestamp>` sibling before retrying. Keep the
+task destination to a unique `.failed-bind-<timestamp>` sibling before retrying. Keep the
 model/data assets and shared OCI cache: they are independent of this failed task build.
 Do not retry concurrently with an active preparation process. Use the committed updated
 recipe and a new log filename. The task lock records the new recipe and image hashes.
 
-This fix changes the recipe, documentation and ignore rules only; the installed Python
-package and frozen dependency environment do not need reinstallation. Before updating
-the checkout, confirm that no campaign is using it directly and that tracked changes
-are absent. Existing submitted campaigns keep their original immutable snapshots.
+This fix changes Python source but not dependencies. A non-editable installed package
+still contains its old source: direct diagnostic commands must select the updated
+checkout explicitly, without modifying the frozen environment:
+
+```bash
+export PYTHONPATH="$TINY_CLM_ROOT/clm${PYTHONPATH:+:$PYTHONPATH}"
+python -c 'import tiny_clm.contextbench as c; print(c.__file__)'
+python -m pytest -q compression/tests/test_container_env.py
+```
+
+The printed module must come from the updated repository's `clm/tiny_clm` directory.
+New submitted jobs already put their immutable source snapshot first on PYTHONPATH.
+Before updating the checkout, confirm that tracked changes are absent and no active
+process is using it directly. Existing campaigns retain their original snapshots.
 
 The xattr `ENOTSUP` warnings and root-mapped fakeroot fallback were not the fatal error
 in the supplied log. Do not add `--ignore-fakeroot-command` or disable containment on

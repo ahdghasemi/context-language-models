@@ -13,6 +13,7 @@ import time
 import urllib.request
 
 from .io import digest, exclusive, file_sha, metadata, read_json, write_json
+from .container import container_environment
 
 
 def tree_hash(root):
@@ -93,11 +94,14 @@ def prepare(config, source, destination, recipe, *, skip_container=False):
         subset_path = destination/"levels.yaml"
         subset_path.write_text(yaml.safe_dump(subset))
         image = destination/"contextbench.sif"
+        container_env = container_environment()
         if not skip_container and not image.exists():
             if not shutil.which("apptainer"):
                 raise RuntimeError("load apptainer/latest on Unity before container preparation")
             tmp = destination/"contextbench.building.sif"
-            subprocess.run(["apptainer", "build", "--fakeroot", str(tmp), str(recipe)], check=True)
+            print("Building task container with inherited bind/mount variables cleared", flush=True)
+            subprocess.run(["apptainer", "build", "--fakeroot", str(tmp), str(recipe)],
+                           env=container_env, check=True)
             os.replace(tmp, image)
         if not skip_container:
             if not shutil.which("singularity"):
@@ -105,7 +109,8 @@ def prepare(config, source, destination, recipe, *, skip_container=False):
             # Exercise the actual Harbor isolation flags before any GPU array.
             subprocess.run(["singularity", "exec", "--writable-tmpfs", "--fakeroot",
                 "--containall", "--pid", "--no-mount", "home,tmp,bind-paths", str(image),
-                "/opt/harbor-server/bin/python3", "-c", "import fastapi,uvicorn; print('container runtime check passed')"], check=True)
+                "/opt/harbor-server/bin/python3", "-c", "import fastapi,uvicorn; print('container runtime check passed')"],
+                env=container_env, check=True)
         # Pinned source via PYTHONPATH, never editable pip installs into a live job environment.
         env = dict(token_env, PYTHONPATH=str(source)+os.pathsep+os.environ.get("PYTHONPATH", ""))
         tasks = destination/"tasks"
@@ -150,7 +155,7 @@ def run(artifact, config, lock_path, output, device="cuda"):
     if not shutil.which("singularity"):
         raise RuntimeError("Harbor needs the singularity compatibility executable from Apptainer")
     spec = read_json(Path(artifact)/"compression.json")
-    env = dict(os.environ, OPENAI_API_KEY="EMPTY",
+    env = dict(container_environment(), OPENAI_API_KEY="EMPTY",
                LITELLM_LOCAL_MODEL_COST_MAP="True", NO_PROXY="*", no_proxy="*",
                TIKTOKEN_CACHE_DIR=lock["budget_tokenizer_cache"]["path"],
                TIKTOKEN_ENCODING=cb.get("budget_tokenizer", "o200k_base"),

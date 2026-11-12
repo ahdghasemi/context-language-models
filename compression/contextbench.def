@@ -3,17 +3,6 @@
 Bootstrap: docker
 From: python@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e
 
-%setup
-    set -eu
-    # Unity binds /nas during the writable %post build. Its destination must
-    # exist before that container starts; creating it in %post is too late.
-    # %setup runs on the host, so restrict writes to the supplied build root.
-    case "${APPTAINER_ROOTFS:-}" in
-        ""|/) echo "Invalid APPTAINER_ROOTFS" >&2; exit 1 ;;
-    esac
-    test -d "$APPTAINER_ROOTFS"
-    mkdir -p -- "$APPTAINER_ROOTFS/nas"
-
 %post
     set -e
     mkdir -p /app /logs
