@@ -16,6 +16,7 @@ from tiny_clm.answer_format import (FORMAT_ID, TOOL_FORMAT_ID, FORMAT_TEXT, Form
 from tiny_clm.protocol_screen import validate_source, evidence_files, verify_inputs, compare_report, sha
 from tiny_clm.provenance import require_gate, verify_snapshot, INFERENCE_RUNTIME
 from tiny_clm.screen_contract import screen_report
+from tiny_clm.history_format import CONTROL, NATIVE, identity as history_identity
 from test_screen import fixture, git_repo
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -221,9 +222,9 @@ def test_submission_snapshots_source_and_uses_three_correctly_dependent_jobs(tmp
         driver.main(args+["--submit"])
 
 
-@pytest.mark.parametrize("protocol,missing_application", [(None, False), (FORMAT_ID, False), (FORMAT_ID, True),
-                                                        (TOOL_FORMAT_ID, False), (TOOL_FORMAT_ID, True)])
-def test_contextbench_routes_agents_preserves_settings_and_records_applied_protocol(tmp_path, monkeypatch, protocol, missing_application):
+@pytest.mark.parametrize("protocol,missing_application,history", [(None, False, None), (FORMAT_ID, False, None), (FORMAT_ID, True, None),
+    (TOOL_FORMAT_ID, False, None), (TOOL_FORMAT_ID, True, None), (TOOL_FORMAT_ID, False, CONTROL), (TOOL_FORMAT_ID, False, NATIVE)])
+def test_contextbench_routes_agents_preserves_settings_and_records_applied_protocol(tmp_path, monkeypatch, protocol, missing_application, history):
     from tiny_clm import contextbench as cb
     cfg, _, lock, _, _ = fixture()
     lock.update(source=str(tmp_path/"pinned-source"), budget_tokenizer_cache={"path": str(tmp_path/"tokens")})
@@ -254,10 +255,19 @@ def test_contextbench_routes_agents_preserves_settings_and_records_applied_proto
             applied = application()
             applied["diagnostic_protocol"] = protocol_identity(protocol)
             save(out/"trials"/name/"agent/answer_format_protocol.json", applied)
+        if history:
+            row = {"history_protocol": history_identity(history), "request": 1,
+                "before_sha256": "a"*64, "after_sha256": ("b" if history == NATIVE else "a")*64,
+                "protected_before_sha256": "d"*64, "protected_after_sha256": "d"*64,
+                "noncontent_fields_equal": True, "changed": [{"message_index": 2, "command_sha256": "c"*64}] if history == NATIVE else [],
+                "unverified_plain_calls": 0}
+            (out/"trials"/name/"agent/history_format.jsonl").write_text(json.dumps(row)+"\n")
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(cb.subprocess, "run", run)
     args = (artifact, cfg, lock_path, out)
     kwargs = dict(task_names=cfg["screen"]["task_names"], diagnostic_protocol=protocol)
+    if history:
+        kwargs.update(modes=["clm"], history_protocol=history)
     if missing_application:
         with pytest.raises(RuntimeError, match="failed episodes"):
             cb.run(*args, **kwargs)
@@ -265,9 +275,10 @@ def test_contextbench_routes_agents_preserves_settings_and_records_applied_proto
         cb.run(*args, **kwargs)
     summary = json.loads((out/"summary.json").read_text())
     assert summary["all_complete"] is not missing_application
-    assert len(calls) == 2
+    assert len(calls) == (1 if history else 2)
     for mode, command, ep in zip(cfg["contextbench"]["modes"], calls, summary["episodes"]):
-        assert command[command.index("-a")+1] == agent_path(mode, protocol)
+        expected = ("tiny_clm.contextbench_protocol:"+({CONTROL: "HistoryControlClm", NATIVE: "NativeHistoryClm"}[history])) if history else agent_path(mode, protocol)
+        assert command[command.index("-a")+1] == expected
         settings = [command[i+1] for i, v in enumerate(command) if v == "--agent-kwarg"]
         for key in ("max_tokens", "max_steps", "temperature", "top_p"):
             assert key+"="+json.dumps(cfg["contextbench"][key]) in settings
@@ -275,6 +286,10 @@ def test_contextbench_routes_agents_preserves_settings_and_records_applied_proto
         assert ep.get("diagnostic_protocol") == protocol_identity(protocol)
         if missing_application:
             assert ep["error"]["type"] == "ProtocolApplicationError"
+        if history:
+            assert summary["screen_modes"] == ["clm"]
+            assert ep["history_protocol"] == summary["history_protocol"] == history_identity(history)
+            assert ep["history_application"]["changed_historical_calls"] == int(history == NATIVE)
     opposite = None if protocol else FORMAT_ID
     with pytest.raises(ValueError, match="another experiment"):
         cb.run(*args, task_names=cfg["screen"]["task_names"], diagnostic_protocol=opposite)

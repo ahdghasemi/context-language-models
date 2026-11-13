@@ -17,7 +17,7 @@ if [[ "$STAGE" == prepare || "$STAGE" == screen_prepare ]]; then
   unset HF_HUB_OFFLINE HF_DATASETS_OFFLINE
 fi
 # Official Unity Apptainer module; no CUDA module is assumed by this wheel workflow.
-if [[ "$STAGE" == prepare || "$STAGE" == contextbench || "$STAGE" == screen_contextbench || "$STAGE" == protocol_contextbench || "$STAGE" == validation_contextbench ]]; then
+if [[ "$STAGE" == prepare || "$STAGE" == contextbench || "$STAGE" == screen_contextbench || "$STAGE" == protocol_contextbench || "$STAGE" == validation_contextbench || "$STAGE" == history_contextbench ]]; then
   module load apptainer/latest
 fi
 SNAPSHOT=$("$TINY_CLM_VENV/bin/python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["snapshot"])' "$MANIFEST")
@@ -29,8 +29,8 @@ export TMPDIR=$(mktemp -d "$TMPDIR/tclm-${SLURM_JOB_ID:-local}-XXXXXX")
 export APPTAINER_TMPDIR="$TMPDIR" SINGULARITY_TMPDIR="$TMPDIR"
 trap 'rm -rf -- "$TMPDIR"' EXIT
 case "$STAGE" in
-  correctness|smoke|prepare|aggregate|screen_check|screen_prepare|screen_report|protocol_check|protocol_report|validation_check|validation_report) STEP_RESOURCE=--cpu ;;
-  environment|train|export|evaluate|profile|contextbench|screen_export|screen_contextbench|cache_audit|history_audit|protocol_contextbench|validation_contextbench|validation_memory) STEP_RESOURCE=--gpu ;;
+  correctness|smoke|prepare|aggregate|screen_check|screen_prepare|screen_report|protocol_check|protocol_report|validation_check|validation_report|history_check|history_report) STEP_RESOURCE=--cpu ;;
+  environment|train|export|evaluate|profile|contextbench|screen_export|screen_contextbench|cache_audit|history_audit|protocol_contextbench|validation_contextbench|validation_memory|history_contextbench) STEP_RESOURCE=--gpu ;;
   *) echo "Unknown stage: $STAGE" >&2; exit 2 ;;
 esac
 "$TINY_CLM_VENV/bin/python" -m tiny_clm.slurm "$STEP_RESOURCE" -- \

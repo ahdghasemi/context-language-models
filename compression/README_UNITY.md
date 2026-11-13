@@ -9,8 +9,10 @@ case. The subsequent [tool-call guidance screen](docs/TOOL_FORMAT_SCREEN.md)
 completed four episodes with the same cap: CLM R130/1102 reached 23/24, while
 R1000/1101 and both append-only episodes remained at zero. The saved GET transition
 confirms a non-call loop; a [single-job history-format replay](docs/HISTORY_AUDIT.md)
-now isolates a possible representation cause. Its GPU result is untested. Earlier
-scores and gates remain unchanged.
+isolates a possible representation cause. A completed positive replay can feed the
+[paired history-format episode test](docs/HISTORY_SCREEN.md), which reruns fresh
+CLM controls and native-history variants without training. Neither diagnostic
+opens the compression gate. Earlier scores remain unchanged.
 
 The user-submitted `baseline-003` completed all nine Slurm stages, including real-model
 evaluation and GPU profiling. **Its capability gate failed: all four CLM and four

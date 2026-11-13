@@ -80,16 +80,23 @@ def qwen3_counts(c):
             "training_subtotal_excluding_workspaces_bytes": 16*p + 8*mlp}
 
 
-def screen_report(config, lock, audit, summary, *, diagnostic_protocol=None):
+def screen_report(config, lock, audit, summary, *, diagnostic_protocol=None, modes=None, history_protocol=None):
     """No screen, even a passing one, is accepted as a baseline/pilot gate."""
     protocol = protocol_identity(diagnostic_protocol)
     tasks = select_task_records(lock["tasks"], config["screen"]["task_names"])
-    expected = {(m, Path(t["path"]).name): t["sha256"]
-                for m in config["contextbench"]["modes"] for t in tasks}
+    selected_modes = config["contextbench"]["modes"] if modes is None else modes
+    if not selected_modes or len(set(selected_modes)) != len(selected_modes) or not set(selected_modes) <= set(config["contextbench"]["modes"]):
+        raise ValueError("invalid evaluation mode subset")
+    history = None
+    if history_protocol is not None:
+        from .history_format import identity
+        history = identity(history_protocol)
+    expected = {(m, Path(t["path"]).name): t["sha256"] for m in selected_modes for t in tasks}
     errors, records, seen = [], [], set()
     if not export_verified(audit, config["model"]):
         errors.append("missing or incompatible export audit")
     if (not summary or not summary.get("all_complete") or
+            summary.get("screen_modes") != modes or summary.get("history_protocol") != history or
             summary.get("diagnostic_protocol") != protocol or
             summary.get("contextbench") != config["contextbench"] or
             summary.get("screen_task_names") != config["screen"]["task_names"] or
@@ -103,6 +110,7 @@ def screen_report(config, lock, audit, summary, *, diagnostic_protocol=None):
         reward = rewards.get("reward")
         valid = isinstance(reward, (int, float)) and math.isfinite(reward) and 0 <= reward <= 1
         if (key not in expected or key in seen or ep.get("status") != "complete" or ep.get("error") or
+                ep.get("history_protocol") != history or
                 ep.get("diagnostic_protocol") != protocol or
                 (protocol is not None and not application_valid(ep.get("protocol_application"), protocol)) or
                 ep.get("returncode") != 0 or rewards.get("grader_valid") != 1 or not valid or

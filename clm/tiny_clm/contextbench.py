@@ -154,11 +154,20 @@ def wait_server(process, url, expected_sha, deadline=180, expected_runtime=None)
 
 
 def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, server_timeout=180,
-        diagnostic_protocol=None):
+        diagnostic_protocol=None, history_protocol=None, modes=None):
     protocol = protocol_identity(diagnostic_protocol)
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
     cb, lock = config["contextbench"], read_json(lock_path)
+    selected_modes = cb["modes"] if modes is None else modes
+    if not selected_modes or len(set(selected_modes)) != len(selected_modes) or not set(selected_modes) <= set(cb["modes"]):
+        raise ValueError("invalid evaluation mode subset")
+    if history_protocol is not None:
+        from .answer_format import TOOL_FORMAT_ID
+        from .history_format import CONTROL, NATIVE, identity, audit_log
+        identity(history_protocol)
+        if selected_modes != ["clm"] or diagnostic_protocol != TOOL_FORMAT_ID:
+            raise ValueError("history experiment requires CLM-only with the fixed tool-format reminder")
     verify_lock(lock, cb)
     selected = {t["path"] for t in select_task_records(lock["tasks"], task_names)}
     if not shutil.which("singularity"):
@@ -178,8 +187,10 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
              "assert a.count_tokens([])[1] == b.count_tokens([])[1] == 'tiktoken:o200k_base'")
     subprocess.run([sys.executable, "-c", check], env=env, check=True)
     episodes = []
-    for mode in cb["modes"]:
+    for mode in selected_modes:
         agent = agent_path(mode, diagnostic_protocol)
+        if history_protocol is not None:
+            agent = "tiny_clm.contextbench_protocol:"+({CONTROL: "HistoryControlClm", NATIVE: "NativeHistoryClm"}[history_protocol])
         for ti, task in enumerate(lock["tasks"]):
             if task["path"] not in selected:
                 continue  # Preserve original task indices (and model RNG seeds).
@@ -192,6 +203,7 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
                 record = read_json(record_path)
                 if (record["weight_sha256"] != spec["weight_sha256"] or record["request_hash"] != digest(cb) or
                         record.get("diagnostic_protocol") != protocol or
+                        record.get("history_protocol") != (identity(history_protocol) if history_protocol else None) or
                         record.get("inference_runtime", LEGACY_INFERENCE_RUNTIME) != runtime):
                     raise ValueError("existing episode belongs to another experiment")
                 episodes.append(record)
@@ -256,6 +268,10 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
                         "inference_runtime": runtime}
                     if protocol is not None:
                         record.update(diagnostic_protocol=protocol, protocol_application=application)
+                    if history_protocol is not None:
+                        history_path = out/"trials"/name/"agent/history_format.jsonl"
+                        history_application = audit_log(history_path, history_protocol)
+                        record.update(history_protocol=identity(history_protocol), history_application=history_application)
                     write_json(record_path, record)
                     episodes.append(record)
                 except Exception as exc:
@@ -266,6 +282,8 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
                               "inference_runtime": runtime}
                     if protocol is not None:
                         record["diagnostic_protocol"] = protocol
+                    if history_protocol is not None:
+                        record["history_protocol"] = identity(history_protocol)
                     write_json(record_path, record)
                     episodes.append(record)
                 finally:
@@ -282,9 +300,14 @@ def run(artifact, config, lock_path, output, device="cuda", *, task_names=None, 
               "scope": "original CLM harness and ContextBench append-only agent; substituted Qwen3 backbone and stated decoding"}
     if task_names is not None:
         result["screen_task_names"] = list(task_names)
+    if modes is not None:
+        result["screen_modes"] = list(modes)
     if protocol is not None:
         result["diagnostic_protocol"] = protocol
         result["scope"] = "prompt-format diagnostic using original agent loops; not the original prompt protocol"
+    if history_protocol is not None:
+        result["history_protocol"] = identity(history_protocol)
+        result["scope"] = "CLM development diagnostic; declared inference-side history formatting with original execution and grading"
     write_json(out/"summary.json", result)
     if not result["all_complete"]:
         raise RuntimeError("ContextBench has failed episodes; see summary.json and logs")

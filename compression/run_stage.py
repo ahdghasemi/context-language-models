@@ -35,6 +35,8 @@ def main():
         command = [sys.executable, "-m", "tiny_clm.cache_audit", str(manifest)]
     elif stage == "history_audit":
         command = [sys.executable, "-m", "tiny_clm.history_audit", str(manifest)]
+    elif stage in ("history_check", "history_contextbench", "history_report"):
+        command = [sys.executable, "-m", "tiny_clm.history_screen", str(manifest), stage]
     elif stage.startswith("protocol_"):
         command = [sys.executable, "-m", "tiny_clm.protocol_screen", str(manifest), stage]
     elif stage.startswith("validation_"):
