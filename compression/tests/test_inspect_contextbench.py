@@ -151,3 +151,93 @@ def test_cli_rejects_mixed_protocols_and_changed_episode_records(tmp_path, monke
     monkeypatch.setattr(sys, "argv", ["inspect_contextbench.py", "--campaign", str(tmp_path), "--episode", "clm--fixture"])
     with pytest.raises(SystemExit):
         inspector.main()
+
+
+@pytest.fixture
+def paired_campaign(tmp_path):
+    import hashlib
+    from tiny_clm.answer_format import TOOL_FORMAT_ID, protocol_identity
+    from tiny_clm.history_format import CONTROL, NATIVE, identity
+    protocol = protocol_identity(TOOL_FORMAT_ID)
+    spec = {"stage": "history_screen", "contract": "paired-history-episodes-v1", "commit": "fixture",
+            "config": {"screen": {"task_names": ["fixture"]}, "contextbench": {"max_tokens": 1024}}}
+    (tmp_path/"manifest.json").write_text(json.dumps(spec))
+    report = {"contract": spec["contract"], "commit": spec["commit"], "complete": True,
+              "passed": False, "can_advance_to_compression": False,
+              "manifest_sha256": hashlib.sha256((tmp_path/"manifest.json").read_bytes()).hexdigest(), "arms": {}}
+    for name, identifier in (("control", CONTROL), ("native_history", NATIVE)):
+        root = tmp_path/name
+        agent = root/"trials/clm--fixture/agent"
+        agent.mkdir(parents=True)
+        log = b'{"fixture": "retained application log"}\n'
+        (agent/"history_format.jsonl").write_bytes(log)
+        record = {"mode": "clm", "episode": "fixture", "status": "complete", "rewards": {"reward": 0},
+                  "diagnostic_protocol": protocol, "history_protocol": identity(identifier),
+                  "history_application": {"history_protocol": identity(identifier), "sha256": hashlib.sha256(log).hexdigest()}}
+        summary = {"episodes": [record], "diagnostic_protocol": protocol, "history_protocol": identity(identifier),
+                   "screen_modes": ["clm"], "screen_task_names": ["fixture"], "contextbench": spec["config"]["contextbench"]}
+        (root/"summary.json").write_text(json.dumps(summary))
+        (root/"clm--fixture.json").write_text(json.dumps(record))
+        report["arms"][name] = {"diagnostic_protocol": protocol,
+                                "episodes": [{k: record[k] for k in ("episode", "mode", "status", "rewards")}]}
+        context = [{"role": "user", "content": "=== get 0 (23 op(s) remaining after this) ===\nGET K00001\n"},
+                   {"role": "assistant", "content": name+"_RETAINED_COMMAND"},
+                   {"role": "tool", "content": name+"_RETAINED_RESULT"}]
+        (agent/"trajectory.json").write_text(json.dumps(context))
+    (tmp_path/"history-screen.json").write_text(json.dumps(report))
+    return tmp_path
+
+
+@pytest.mark.parametrize("arm", [None, "control", "native_history"])
+def test_paired_negative_campaign_readonly_and_arm_selection(paired_campaign, monkeypatch, capsys, arm):
+    import sys
+    root = paired_campaign
+    argv = ["inspect_contextbench.py", "--campaign", str(root), "--episode", "clm--fixture", "--get-samples", "2"]
+    monkeypatch.setattr(sys, "argv", argv+(["--arm", arm] if arm else []))
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    inspector.main()
+    output = capsys.readouterr().out
+    for name in ("control", "native_history"):
+        assert (name+"_RETAINED_RESULT" in output) == (arm is None or arm == name)
+    assert "FIRST_GET_RETAINED_RESPONSES" in output and "HISTORY_PROTOCOL" in output
+    assert before == {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("fault", ["manifest", "report_commit", "report_reward", "history_protocol",
+    "prompt_protocol", "scope", "duplicate_episode", "record", "application_log", "run_id"])
+def test_paired_inspection_rejects_mixed_evidence(paired_campaign, monkeypatch, fault):
+    import sys
+    root = paired_campaign
+    def alter(relative, change):
+        path = root/relative
+        value = json.loads(path.read_text())
+        change(value)
+        path.write_text(json.dumps(value))
+    if fault == "manifest":
+        alter("manifest.json", lambda x: x.update(commit="other"))
+    elif fault == "report_commit":
+        alter("history-screen.json", lambda x: x.update(commit="other"))
+    elif fault == "report_reward":
+        alter("history-screen.json", lambda x: x["arms"]["native_history"]["episodes"][0].update(rewards={"reward": 1}))
+    elif fault in ("history_protocol", "prompt_protocol", "scope"):
+        key = {"history_protocol": "history_protocol", "prompt_protocol": "diagnostic_protocol", "scope": "screen_modes"}[fault]
+        alter("native_history/summary.json", lambda x: x.update({key: None}))
+    elif fault == "duplicate_episode":
+        alter("native_history/summary.json", lambda x: x["episodes"].append(x["episodes"][0]))
+    elif fault == "record":
+        alter("native_history/clm--fixture.json", lambda x: x.update(rewards={"reward": 1}))
+    elif fault == "application_log":
+        (root/"native_history/trials/clm--fixture/agent/history_format.jsonl").write_text("changed")
+    argv = ["inspect_contextbench.py", "--campaign", str(root), "--arm", "native_history", "--episode", "clm--fixture"]
+    monkeypatch.setattr(sys, "argv", argv+(["--run-id", "wrong"] if fault == "run_id" else []))
+    with pytest.raises(SystemExit):
+        inspector.main()
+
+
+def test_arm_option_cannot_relabel_an_original_screen(tmp_path, monkeypatch):
+    import sys
+    (tmp_path/"manifest.json").write_text(json.dumps({"stage": "backbone_screen"}))
+    monkeypatch.setattr(sys, "argv", ["inspect_contextbench.py", "--campaign", str(tmp_path),
+        "--arm", "native_history", "--episode", "clm--fixture"])
+    with pytest.raises(SystemExit):
+        inspector.main()

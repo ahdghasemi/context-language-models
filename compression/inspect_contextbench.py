@@ -176,10 +176,54 @@ def inspect(root, name, count=2, chars=1400, max_tokens=None, get_samples=0):
                 print("FOLLOWING", excerpt(item, chars))
 
 
+def history_locations(campaign, spec, arm):
+    """Resolve paired arms from their report, without importing the ML runtime.
+
+    Check provenance and retained record agreement, not task quality. A complete
+    negative experiment is valid input; this never changes its gate or scores.
+    """
+    report = read(campaign/"history-screen.json")
+    contract = "paired-history-episodes-v1"
+    if (spec.get("contract") != contract or report.get("contract") != contract or
+            report.get("commit") != spec["commit"] or
+            report.get("manifest_sha256") != hashlib.sha256((campaign/"manifest.json").read_bytes()).hexdigest()):
+        raise ValueError("paired history report does not match campaign manifest")
+    identifiers = {"control": "plain-history-control-v1", "native_history": "verified-native-history-v1"}
+    locations = []
+    tasks = spec["config"]["screen"]["task_names"]
+    for name in ([arm] if arm else identifiers):
+        root = campaign/name
+        summary = read(root/"summary.json")
+        arm_report = report["arms"][name]
+        protocol = arm_report.get("diagnostic_protocol")
+        history = {"id": identifiers[name], "placement": "inference_messages_only",
+                   "verification": "matching_previously_observed_structured_bash_arguments"}
+        if (not isinstance(protocol, dict) or protocol.get("id") != "kv-answer-and-tool-format-v1" or
+                summary.get("diagnostic_protocol") != protocol or summary.get("history_protocol") != history or
+                summary.get("screen_modes") != ["clm"] or summary.get("screen_task_names") != tasks or
+                summary.get("contextbench") != spec["config"]["contextbench"]):
+            raise ValueError(f"paired history scope or protocol differs: {name}")
+        records = summary["episodes"]
+        reported = arm_report["episodes"]
+        expected = {("clm", task) for task in tasks}
+        for rows in (records, reported):
+            if len(rows) != len(expected) or {(r["mode"], r["episode"]) for r in rows} != expected:
+                raise ValueError(f"paired history episode coverage differs: {name}")
+        by_key = {(r["mode"], r["episode"]): r for r in records}
+        for row in reported:
+            record = by_key[row["mode"], row["episode"]]
+            if any(record.get(k) != v for k, v in row.items()):
+                raise ValueError(f"paired history report and summary records differ: {name}")
+        locations.append((name, root, protocol, history))
+    return locations
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--campaign", required=True, type=Path)
     parser.add_argument("--run-id")
+    parser.add_argument("--arm", choices=("control", "native_history"),
+                        help="paired history campaign only; omit to inspect both arms")
     parser.add_argument("--episode", action="append", required=True,
                         help="Exact mode--task name; repeat for additional episodes")
     parser.add_argument("--samples", type=int, default=2)
@@ -191,36 +235,53 @@ def main():
         parser.error("samples must be positive, chars >=100, and get-samples nonnegative")
     spec = read(args.campaign/"manifest.json")
     single_stages = {"backbone_screen", "protocol_screen", "protocol_validation"}
-    if spec.get("stage") in single_stages:
+    if args.arm is not None and spec.get("stage") != "history_screen":
+        parser.error("--arm applies only to paired history campaigns")
+    if spec.get("stage") == "history_screen":
+        if args.run_id is not None:
+            parser.error("paired history campaigns use --arm, not --run-id")
+        try:
+            locations = history_locations(args.campaign, spec, args.arm)
+        except (KeyError, ValueError) as exc:
+            parser.error(str(exc))
+    elif spec.get("stage") in single_stages:
         if args.run_id is not None:
             parser.error("this campaign has no training run ID; omit --run-id")
-        locations = [(spec["stage"], args.campaign/"contextbench")]
+        locations = [(spec["stage"], args.campaign/"contextbench", spec.get("diagnostic_protocol"), None)]
     else:
         if "rows" not in spec:
             parser.error("unsupported campaign stage or missing run rows")
-        locations = [(r["run_id"], args.campaign/"runs"/r["run_id"]/"contextbench")
+        locations = [(r["run_id"], args.campaign/"runs"/r["run_id"]/"contextbench", spec.get("diagnostic_protocol"), None)
                      for r in spec["rows"] if args.run_id is None or r["run_id"] == args.run_id]
     if not locations:
         parser.error("run-id is not in the campaign")
     print("Read-only retained-message excerpts; not raw token IDs or a full execution history.")
-    for run_id, root in locations:
+    for run_id, root, protocol, history in locations:
         summary = read(root/"summary.json")
-        if summary.get("diagnostic_protocol") != spec.get("diagnostic_protocol"):
+        if summary.get("diagnostic_protocol") != protocol or summary.get("history_protocol") != history:
             parser.error("campaign and summary prompt-protocol identities differ")
         allowed = {e["mode"]+"--"+e["episode"] for e in summary["episodes"]}
         if not set(args.episode) <= allowed:
             parser.error(f"Unknown episode; available: {sorted(allowed)}")
         print("RUN", run_id, "COMMIT", spec["commit"])
-        print("PROMPT_PROTOCOL", json.dumps(spec.get("diagnostic_protocol")))
+        print("PROMPT_PROTOCOL", json.dumps(protocol))
+        if history is not None:
+            print("HISTORY_PROTOCOL", json.dumps(history))
         cap = summary.get("contextbench", {}).get("max_tokens")
         for name in args.episode:
             # Refuse a different per-episode identity rather than label it with
             # the campaign's prompt. No requirement for a passing quality gate.
             record = read(root/(name+".json"))
-            if record.get("diagnostic_protocol") != summary.get("diagnostic_protocol"):
+            if record.get("diagnostic_protocol") != protocol or record.get("history_protocol") != history:
                 parser.error("episode and summary prompt-protocol identities differ")
             if record not in summary["episodes"]:
                 parser.error("episode record differs from summary")
+            if history is not None:
+                application = record.get("history_application") or {}
+                path = root/"trials"/name/"agent/history_format.jsonl"
+                if (application.get("history_protocol") != history or
+                        application.get("sha256") != hashlib.sha256(path.read_bytes()).hexdigest()):
+                    parser.error("history application log differs from episode audit")
             inspect(root, name, args.samples, args.chars, max_tokens=cap, get_samples=args.get_samples)
 
 
