@@ -1,0 +1,102 @@
+--- a/contextbench/stream.py
++++ b/contextbench/stream.py
+@@ -21,0 +22,3 @@
++
++# Modified by tiny-clm: quote-aware here-document detection. The existing
++# readiness/submit contracts and statement matcher remain unchanged.
+@@ -88,0 +92,39 @@
++def _heredoc_openings(line: str, quote: str | None) -> tuple[list[tuple[str, str, str]], str | None]:
++    """Find real here-doc operators, carrying shell quote state between lines.
++
++    Quoted text (including multiline printf formats) and here-strings are not
++    here-doc openers. Keep the existing identifier-delimiter grammar; this is
++    not a general shell parser or proof that every matched statement executes.
++    """
++    pending: list[tuple[str, str, str]] = []
++    i = 0
++    while i < len(line):
++        c = line[i]
++        if quote is not None:
++            if quote == '"' and c == "\\":
++                i += 2
++                continue
++            if c == quote:
++                quote = None
++            i += 1
++            continue
++        if c == "\\":
++            i += 2
++            continue
++        if c in "'\"":
++            quote = c
++        elif c == "#" and (i == 0 or line[i - 1].isspace() or line[i - 1] in ";|&()"):
++            break
++        elif line.startswith("<<<", i):
++            i += 3
++            continue
++        elif line.startswith("<<", i):
++            match = _HEREDOC_OPEN.match(line, i)
++            if match:
++                pending.append(match.groups())
++                i = match.end()
++                continue
++        i += 1
++    return pending, quote
++
++
+@@ -96,0 +139 @@
++    quote: str | None = None
+@@ -101 +144 @@
+-        pending = _HEREDOC_OPEN.findall(line)
++        pending, quote = _heredoc_openings(line, quote)
+--- a/tests/test_stream.py
++++ b/tests/test_stream.py
+@@ -3,0 +4,2 @@
++
++# Additional tiny-clm regressions cover quoted here-doc lookalikes.
+@@ -161,0 +164,45 @@
++
++
++@pytest.mark.parametrize("command", [
++    "printf '<<<ANSWER key=K00000>>>\n%s\n<<<ANSWER END>>>\n' value; echo READY_FOR_NEXT_OP",
++    'printf "<<<ANSWER key=K00000>>>\n%s\n<<<ANSWER END>>>\n" value; echo READY_FOR_NEXT_OP',
++    "printf '%s\n' '<<EOF\ntext\n'; echo READY_FOR_NEXT_OP",
++    "printf '%s' '\n<<EOF\ntext\n'; echo READY_FOR_NEXT_OP",
++    "cat <<<value\necho READY_FOR_NEXT_OP",
++    "cat <<<\"value\"\necho READY_FOR_NEXT_OP",
++    "printf '%s' \\<<EOF\necho READY_FOR_NEXT_OP",
++    "# cat <<EOF\necho READY_FOR_NEXT_OP",
++    "printf '%s' 'x' # <<EOF\necho READY_FOR_NEXT_OP",
++    "printf '%s' 'multiline\ntext'; cat <<'EOF'\nbody\nEOF\necho READY_FOR_NEXT_OP",
++])
++def test_quoted_delimiters_and_here_strings_do_not_swallow_real_marker(command):
++    assert proto.is_ready_command(command)
++    assert not proto.is_ready_command(command, exit_code=1)
++
++
++@pytest.mark.parametrize("command", [
++    "printf '<<<ANSWER key=K00000>>>\necho READY_FOR_NEXT_OP\n<<<ANSWER END>>>\n'",
++    "printf '%s' 'unterminated\n<<<ANSWER\necho READY_FOR_NEXT_OP",
++    "cat <<EOF\necho READY_FOR_NEXT_OP\nEOF",
++    "cat <<'EOF'\necho READY_FOR_NEXT_OP\nEOF",
++    "cat <<\"EOF\"\necho READY_FOR_NEXT_OP\nEOF",
++    "cat <<-EOF\n\techo READY_FOR_NEXT_OP\n\tEOF",
++    "cat <<A <<'B'\nfirst\nA\necho READY_FOR_NEXT_OP\nB",
++    "cat <<<\"value\necho READY_FOR_NEXT_OP\"",
++    "printf '%s' 'before\ntext'; cat <<'EOF'\necho READY_FOR_NEXT_OP\nEOF",
++])
++def test_marker_inside_data_still_does_not_advance(command):
++    assert not proto.is_ready_command(command)
++
++
++def test_multiline_answer_data_does_not_swallow_real_submit():
++    assert proto.is_submit_command(
++        "printf '<<<ANSWER>>>\nvalue\n<<<ANSWER END>>>\n'; echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
++    assert not proto.is_submit_command(
++        "printf '<<<ANSWER>>>\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n<<<ANSWER END>>>\n'")
++
++
++@pytest.mark.xfail(strict=True, reason="existing statement splitter does not parse nested shell substitutions")
++def test_nested_substitution_remains_an_explicit_parser_limitation():
++    command = '''printf '%s\n' "$(printf '%s' '=\"[^\"]*\"')"; echo READY_FOR_NEXT_OP'''
++    assert proto.is_ready_command(command)

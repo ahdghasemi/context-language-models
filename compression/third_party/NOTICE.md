@@ -19,6 +19,12 @@ from `contextbench/graders/kv.py` at the same pinned Apache-2.0 revision. Its
 surrounding code is a separate read-only diagnostic, not a modified benchmark
 grader. The original license is included as `ContextBench-LICENSE`.
 
+`compression/patches/contextbench-quoted-heredoc.patch` contains proposed changes to
+`contextbench/stream.py` and `tests/test_stream.py` at the same pinned Apache-2.0
+revision. It makes here-document detection aware of shell quoting and adds
+regression tests. Modified files carry change notices; the original license is
+`ContextBench-LICENSE`. No workflow automatically applies this diagnostic patch.
+
 The ASVD baseline is an independent implementation of the published algorithm, with
 source/revision and explicit differences documented in `docs/RELATED_WORK.md`.
 Supplied private GNN/Flow code and manuscripts are not redistributed.
